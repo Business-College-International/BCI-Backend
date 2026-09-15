@@ -9,6 +9,7 @@ import { RoleName } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
 import { CreateStaffDutyDto } from './dto/create-staff-duty.dto';
 import { CreateTeacherAssignmentDto } from './dto/create-teacher-assignment.dto';
+import { ListTeacherAssignmentsDto } from './dto/list-teacher-assignments.dto';
 
 @Injectable()
 export class StaffService {
@@ -144,18 +145,63 @@ export class StaffService {
     }
   }
 
-  async listTeacherAssignmentsForStaff(staffPersonId: string) {
+  async listTeacherAssignmentsForStaff(staffPersonId: string, filters: ListTeacherAssignmentsDto = {}) {
     const staff = await this.prisma.staff.findUnique({ where: { personId: staffPersonId }, select: { personId: true } });
     if (!staff) throw new NotFoundException('Staff member not found.');
 
     return this.prisma.teacherAssignment.findMany({
-      where: { staffId: staffPersonId },
+      where: {
+        staffId: staffPersonId,
+        ...(filters.termId ? { termId: filters.termId } : {}),
+        ...(filters.classId ? { classId: filters.classId } : {}),
+        ...(filters.subjectId ? { subjectId: filters.subjectId } : {}),
+      },
       include: {
         class: { select: { id: true, name: true, level: true, programme: true, room: true } },
         subject: { select: { id: true, code: true, name: true } },
         term: { select: { id: true, code: true, name: true, startsAt: true, endsAt: true, status: true } },
       },
       orderBy: [{ term: { startsAt: 'desc' } }, { class: { name: 'asc' } }],
+    });
+  }
+
+  async listAllTeacherAssignments(filters: ListTeacherAssignmentsDto = {}) {
+    return this.prisma.teacherAssignment.findMany({
+      where: {
+        ...(filters.termId ? { termId: filters.termId } : {}),
+        ...(filters.classId ? { classId: filters.classId } : {}),
+        ...(filters.subjectId ? { subjectId: filters.subjectId } : {}),
+      },
+      include: {
+        staff: { include: { person: { select: { firstName: true, lastName: true, phone: true, email: true } } } },
+        class: { select: { id: true, name: true, level: true, programme: true, room: true } },
+        subject: { select: { id: true, code: true, name: true } },
+        term: { select: { id: true, code: true, name: true, startsAt: true, endsAt: true, status: true } },
+      },
+      orderBy: [{ term: { startsAt: 'desc' } }, { class: { name: 'asc' } }],
+    });
+  }
+
+  async removeTeacherAssignment(assignmentId: string, actorUserId: string) {
+    const assignment = await this.prisma.teacherAssignment.findUnique({
+      where: { id: assignmentId },
+      include: { term: { select: { status: true } }, staff: { select: { personId: true } } },
+    });
+    if (!assignment) throw new NotFoundException('Teacher assignment not found.');
+    if (assignment.term.status === 'CLOSED') throw new BadRequestException('Teacher assignments cannot be changed for a closed term.');
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.teacherAssignment.delete({ where: { id: assignmentId } });
+      await tx.auditLog.create({
+        data: {
+          actorUserId,
+          action: 'DELETE',
+          entityType: 'TeacherAssignment',
+          entityId: assignmentId,
+          beforeJson: { staffId: assignment.staff.personId },
+        },
+      });
+      return { success: true };
     });
   }
 
