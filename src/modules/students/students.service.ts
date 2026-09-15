@@ -1,6 +1,7 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { RoleName } from '@prisma/client';
+import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { RoleName, StudentStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
+import { WithdrawStudentDto } from './dto/withdraw-student.dto';
 
 const PRIVILEGED_STUDENT_READ_ROLES = new Set<RoleName>([
   RoleName.DIRECTOR,
@@ -107,6 +108,83 @@ export class StudentsService {
     }
 
     throw new ForbiddenException('You do not have access to this student.');
+  }
+
+  async withdraw(studentId: string, actorUserId: string, dto: WithdrawStudentDto) {
+    return this.prisma.$transaction(async (tx) => {
+      const student = await tx.student.findUnique({
+        where: { id: studentId },
+        include: {
+          enrolments: {
+            where: { status: 'ACTIVE' },
+            orderBy: { enrolledAt: 'desc' },
+            take: 1,
+          },
+        },
+      });
+
+      if (!student) throw new NotFoundException('Student not found.');
+      if (student.status !== StudentStatus.ACTIVE) {
+        throw new ConflictException('Only an active student can be withdrawn.');
+      }
+
+      const activeEnrolment = student.enrolments[0];
+      if (!activeEnrolment) {
+        throw new ConflictException('Student has no active enrolment to withdraw.');
+      }
+
+      const now = new Date();
+      const updatedEnrolment = await tx.enrolment.update({
+        where: { id: activeEnrolment.id },
+        data: {
+          status: 'WITHDRAWN',
+          completedAt: now,
+          exitReason: dto.reason.trim(),
+        },
+      });
+
+      const updatedStudent = await tx.student.update({
+        where: { id: studentId },
+        data: { status: StudentStatus.WITHDRAWN },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          actorUserId,
+          action: 'UPDATE',
+          entityType: 'Student',
+          entityId: studentId,
+          beforeJson: {
+            status: student.status,
+            enrolment: {
+              id: activeEnrolment.id,
+              status: activeEnrolment.status,
+            },
+          },
+          afterJson: {
+            status: updatedStudent.status,
+            enrolment: {
+              id: updatedEnrolment.id,
+              status: updatedEnrolment.status,
+              exitReason: updatedEnrolment.exitReason,
+            },
+          },
+        },
+      });
+
+      return {
+        student: {
+          id: updatedStudent.id,
+          status: updatedStudent.status,
+        },
+        enrolment: {
+          id: updatedEnrolment.id,
+          status: updatedEnrolment.status,
+          completedAt: updatedEnrolment.completedAt,
+          exitReason: updatedEnrolment.exitReason,
+        },
+      };
+    });
   }
 
   private toActorView(student: {
