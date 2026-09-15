@@ -1,7 +1,5 @@
 // BCI School Management System — starter schema
-// Run `npx prisma migrate dev` after setting DATABASE_URL in .env
-// This covers the core entities from docs/MASTER_PLAN.md section 5.
-// Extend per-module as each phase is built (see roadmap).
+// This schema is intentionally being hardened incrementally before production.
 
 generator client {
   provider = "prisma-client-js"
@@ -41,7 +39,7 @@ enum Level {
 }
 
 enum Programme {
-  NONE // KG/Primary/JHS
+  NONE
   AGRIC
   GENERAL_ARTS
   BUSINESS
@@ -70,7 +68,6 @@ model User {
   status       String    @default("active")
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
-
   roles        UserRole[]
   guardian     Guardian?
   staff        Staff?
@@ -81,7 +78,6 @@ model UserRole {
   userId String
   role   RoleName
   user   User     @relation(fields: [userId], references: [id])
-
   @@unique([userId, role])
 }
 
@@ -90,7 +86,6 @@ model Guardian {
   occupation String?
   address    String?
   user       User     @relation(fields: [userId], references: [id])
-
   wards      GuardianStudent[]
 }
 
@@ -100,10 +95,8 @@ model GuardianStudent {
   studentId        String
   relationship     String
   isPrimaryContact Boolean  @default(false)
-
   guardian Guardian @relation(fields: [guardianId], references: [userId])
   student  Student  @relation(fields: [studentId], references: [id])
-
   @@unique([guardianId, studentId])
 }
 
@@ -113,7 +106,6 @@ model Staff {
   department     String?
   employmentDate DateTime?
   contractType   String?
-
   user           User     @relation(fields: [userId], references: [id])
   duties         StaffDuty[]
   teaching       TeacherAssignment[]
@@ -127,20 +119,18 @@ model StaffDuty {
   description String
   assignedBy  String?
   active      Boolean  @default(true)
-
   staff Staff @relation(fields: [staffId], references: [userId])
 }
 
 model Class {
-  id            String    @id @default(uuid())
-  name          String
-  level         Level
-  programme     Programme @default(NONE)
-  division      String?   // A, B, C
-  academicYear  String
-
-  students      Student[]
-  assignments   TeacherAssignment[]
+  id           String    @id @default(uuid())
+  name         String
+  level        Level
+  programme    Programme @default(NONE)
+  division     String?
+  academicYear String
+  students     Student[]
+  assignments  TeacherAssignment[]
 }
 
 model Subject {
@@ -148,7 +138,6 @@ model Subject {
   name        String
   level       Level
   isElective  Boolean  @default(false)
-
   assignments TeacherAssignment[]
   electives   StudentElective[]
 }
@@ -159,7 +148,6 @@ model TeacherAssignment {
   classId   String
   subjectId String
   termId    String
-
   staff   Staff   @relation(fields: [staffId], references: [userId])
   class   Class   @relation(fields: [classId], references: [id])
   subject Subject @relation(fields: [subjectId], references: [id])
@@ -170,38 +158,35 @@ model SalaryStructure {
   basePay    Decimal
   allowances Json?
   deductions Json?
-
   staff Staff @relation(fields: [staffId], references: [userId])
 }
 
 model PayrollRun {
   id           String   @id @default(uuid())
   staffId      String
-  period       String   // e.g. "2026-09"
+  period       String
   gross        Decimal
   net          Decimal
   status       String   @default("pending")
   moolreTxnRef String?
   paidAt       DateTime?
-
   staff Staff @relation(fields: [staffId], references: [userId])
 }
 
 model Student {
-  id              String        @id @default(uuid())
-  firstName       String
-  lastName        String
-  dob             DateTime
-  hometown        String?
-  region          String?
+  id               String        @id @default(uuid())
+  firstName        String
+  lastName         String
+  dob              DateTime
+  hometown         String?
+  region           String?
   passportPhotoUrl String?
-  previousSchool  String?
-  level           Level
-  programme       Programme     @default(NONE)
-  classId         String?
-  status          StudentStatus @default(ACTIVE)
-  admittedAt      DateTime?
-
+  previousSchool   String?
+  level            Level
+  programme        Programme     @default(NONE)
+  classId          String?
+  status           StudentStatus @default(ACTIVE)
+  admittedAt       DateTime?
   class      Class?  @relation(fields: [classId], references: [id])
   guardians  GuardianStudent[]
   documents  StudentDocument[]
@@ -216,18 +201,15 @@ model StudentDocument {
   studentId String
   type      String
   fileUrl   String
-
   student Student @relation(fields: [studentId], references: [id])
 }
 
 model StudentElective {
-  id        String  @id @default(uuid())
+  id        String   @id @default(uuid())
   studentId String
   subjectId String
-
   student Student @relation(fields: [studentId], references: [id])
   subject Subject @relation(fields: [subjectId], references: [id])
-
   @@unique([studentId, subjectId])
 }
 
@@ -236,38 +218,37 @@ model Attendance {
   studentId String
   classId   String
   date      DateTime
-  status    String   // present | absent | late
+  status    String
   markedBy  String
-
   student Student @relation(fields: [studentId], references: [id])
-
   @@unique([studentId, date])
 }
 
 model Application {
-  id               String             @id @default(uuid())
+  id               String            @id @default(uuid())
+  trackingCode     String            @unique @default(cuid())
   firstName        String
   lastName         String
   dob              DateTime
   levelApplied     Level
-  programmeApplied Programme          @default(NONE)
+  programmeApplied Programme         @default(NONE)
   guardianName     String
   guardianPhone    String
   previousSchool   String?
   passportPhotoUrl String?
-  status           ApplicationStatus  @default(PENDING)
+  status           ApplicationStatus @default(PENDING)
   reviewedBy       String?
-  submittedAt      DateTime           @default(now())
+  submittedAt      DateTime          @default(now())
+  @@index([status, submittedAt])
 }
 
 model FeeStructure {
-  id        String   @id @default(uuid())
+  id        String    @id @default(uuid())
   level     Level
   programme Programme @default(NONE)
   term      String
   itemName  String
   amount    Decimal
-
   bills StudentBill[]
 }
 
@@ -279,7 +260,6 @@ model StudentBill {
   amountDue      Decimal
   amountPaid     Decimal  @default(0)
   status         String   @default("unpaid")
-
   student      Student      @relation(fields: [studentId], references: [id])
   feeStructure FeeStructure @relation(fields: [feeStructureId], references: [id])
 }
@@ -289,7 +269,7 @@ model Payment {
   studentId    String?
   guardianId   String?
   amount       Decimal
-  purpose      String   // fee | wallet_topup | stationery
+  purpose      String
   moolreTxnRef String?
   status       String   @default("pending")
   receiptUrl   String?
@@ -299,7 +279,6 @@ model Payment {
 model Wallet {
   studentId String   @id
   balance   Decimal  @default(0)
-
   student      Student @relation(fields: [studentId], references: [id])
   transactions WalletTransaction[]
 }
@@ -307,11 +286,10 @@ model Wallet {
 model WalletTransaction {
   id          String   @id @default(uuid())
   walletId    String
-  type        String   // topup | withdrawal
+  type        String
   amount      Decimal
   processedBy String?
   createdAt   DateTime @default(now())
-
   wallet Wallet @relation(fields: [walletId], references: [studentId])
 }
 
@@ -337,7 +315,7 @@ model Announcement {
   id            String   @id @default(uuid())
   title         String
   body          String
-  audienceScope String   // all | level:SHS3 | class:<id> etc.
+  audienceScope String
   sentBy        String
   smsSent       Boolean  @default(false)
   createdAt     DateTime @default(now())
