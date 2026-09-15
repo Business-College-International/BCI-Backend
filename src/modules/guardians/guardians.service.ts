@@ -1,10 +1,54 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { RoleName } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
 import { UpdateMyProfileDto } from './dto/update-my-profile.dto';
+import { ListGuardiansDto } from './dto/list-guardians.dto';
+
+const GUARDIAN_DIRECTORY_ROLES = new Set<RoleName>([
+  RoleName.DIRECTOR,
+  RoleName.PRINCIPAL,
+  RoleName.OFFICE,
+]);
 
 @Injectable()
 export class GuardiansService {
   constructor(private readonly prisma: PrismaService) {}
+
+  async listDirectory(query: ListGuardiansDto, roles: RoleName[]) {
+    if (!roles.some((role) => GUARDIAN_DIRECTORY_ROLES.has(role))) {
+      throw new ForbiddenException('Guardian directory access is restricted.');
+    }
+
+    const q = query.q?.trim();
+    const guardians = await this.prisma.guardian.findMany({
+      where: q
+        ? {
+            person: {
+              OR: [
+                { firstName: { contains: q, mode: 'insensitive' } },
+                { lastName: { contains: q, mode: 'insensitive' } },
+                { phone: { contains: q, mode: 'insensitive' } },
+                { email: { contains: q, mode: 'insensitive' } },
+              ],
+            },
+          }
+        : undefined,
+      include: {
+        person: { select: { firstName: true, middleName: true, lastName: true, phone: true, email: true } },
+        _count: { select: { wards: true } },
+      },
+      orderBy: [{ person: { lastName: 'asc' } }, { person: { firstName: 'asc' } }],
+      take: 250,
+    });
+
+    return guardians.map((guardian) => ({
+      personId: guardian.personId,
+      name: [guardian.person.firstName, guardian.person.middleName, guardian.person.lastName].filter(Boolean).join(' '),
+      phone: guardian.person.phone,
+      email: guardian.person.email,
+      wardCount: guardian._count.wards,
+    }));
+  }
 
   async getMyProfile(userId: string) {
     const guardian = await this.prisma.guardian.findUnique({
