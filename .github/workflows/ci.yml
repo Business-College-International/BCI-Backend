@@ -15,5 +15,6 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm install
+      - run: npx prisma validate
       - run: npx prisma generate
       - run: npm run build
