@@ -11,7 +11,19 @@ describe('StudentLifecycleService', () => {
   it('rejects progression into a full target class', async () => {
     const tx = {
       student: {
-        findUnique: jest.fn().mockResolvedValue({ id: 'student-1', status: 'ACTIVE', enrolments: [{ id: 'enrol-1', termId: 'term-1', classId: 'class-1', level: 'SHS1', programme: 'BUSINESS', enrolledAt: new Date('2026-01-01') }] }),
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'student-1',
+          status: 'ACTIVE',
+          enrolments: [{
+            id: 'enrol-1',
+            termId: 'term-1',
+            classId: 'class-1',
+            level: 'SHS1',
+            programme: 'BUSINESS',
+            enrolledAt: new Date('2026-01-01'),
+            term: { endsAt: new Date('2026-07-31') },
+          }],
+        }),
       },
       term: { findUnique: jest.fn().mockResolvedValue({ id: 'term-2', academicYearId: 'year-1', startsAt: new Date('2026-09-01'), academicYear: {} }) },
       schoolClass: { findUnique: jest.fn().mockResolvedValue({ id: 'class-2', academicYearId: 'year-1', level: 'SHS2', programme: 'BUSINESS', capacity: 1 }) },
