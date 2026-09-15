@@ -52,7 +52,7 @@ export class StudentLifecycleService {
     return this.prisma.$transaction(async (tx) => {
       const student = await tx.student.findUnique({
         where: { id: studentId },
-        include: { enrolments: { where: { status: 'ACTIVE' }, orderBy: { enrolledAt: 'desc' }, take: 1 } },
+        include: { enrolments: { where: { status: 'ACTIVE' }, orderBy: { enrolledAt: 'desc' }, take: 1, include: { term: true } } },
       });
       if (!student) throw new NotFoundException('Student not found.');
       if (student.status !== 'ACTIVE') throw new ConflictException('Only active students can be progressed.');
@@ -65,8 +65,8 @@ export class StudentLifecycleService {
       ]);
       if (!targetTerm) throw new NotFoundException('Target term not found.');
       if (!targetClass) throw new NotFoundException('Target class not found.');
-      if (targetTerm.id === current.termId || targetTerm.startsAt <= new Date(current.enrolledAt)) {
-        throw new BadRequestException('Target term must occur after the current enrolment.');
+      if (targetTerm.id === current.termId || targetTerm.startsAt < current.term.endsAt) {
+        throw new BadRequestException('Target term must begin after the current term ends.');
       }
       if (targetClass.academicYearId !== targetTerm.academicYearId) throw new BadRequestException('Target class must belong to the target term academic year.');
       if (targetClass.level !== dto.targetLevel || targetClass.programme !== dto.targetProgramme) throw new BadRequestException('Target class does not match the requested progression level/programme.');
