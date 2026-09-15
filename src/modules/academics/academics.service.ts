@@ -1,8 +1,16 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { RoleName } from '@prisma/client';
 import { CreateAcademicYearDto } from './dto/create-academic-year.dto';
 import { CreateClassDto } from './dto/create-class.dto';
 import { CreateTermDto } from './dto/create-term.dto';
 import { PrismaService } from '../../prisma.service';
+
+const PRIVILEGED_ACADEMIC_READ_ROLES = new Set<RoleName>([
+  RoleName.DIRECTOR,
+  RoleName.PRINCIPAL,
+  RoleName.OFFICE,
+  RoleName.ACCOUNTANT,
+]);
 
 @Injectable()
 export class AcademicsService {
@@ -70,9 +78,31 @@ export class AcademicsService {
     });
   }
 
-  async listClasses(academicYearId?: string) {
+  async listClasses(academicYearId: string | undefined, userId: string, roles: RoleName[]) {
+    const isPrivileged = roles.some((role) => PRIVILEGED_ACADEMIC_READ_ROLES.has(role));
+    let classIds: string[] | undefined;
+
+    if (!isPrivileged && roles.includes(RoleName.TEACHER)) {
+      const staff = await this.prisma.staff.findUnique({ where: { userId }, select: { personId: true } });
+      if (!staff) throw new ForbiddenException('Teacher access requires an active staff link.');
+
+      const assignments = await this.prisma.teacherAssignment.findMany({
+        where: academicYearId
+          ? { staffId: staff.personId, class: { academicYearId } }
+          : { staffId: staff.personId },
+        select: { classId: true },
+        distinct: ['classId'],
+      });
+      classIds = assignments.map((assignment) => assignment.classId);
+    } else if (!isPrivileged) {
+      return [];
+    }
+
     return this.prisma.schoolClass.findMany({
-      where: academicYearId ? { academicYearId } : undefined,
+      where: {
+        ...(academicYearId ? { academicYearId } : {}),
+        ...(classIds ? { id: { in: classIds } } : {}),
+      },
       orderBy: [{ level: 'asc' }, { name: 'asc' }],
     });
   }
