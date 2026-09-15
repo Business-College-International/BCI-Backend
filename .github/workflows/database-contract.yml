@@ -1,0 +1,55 @@
+name: Backend Database Contract
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  database-contract:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: bci
+          POSTGRES_PASSWORD: bci
+          POSTGRES_DB: bci_contract
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U bci -d bci_contract"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://bci:bci@localhost:5432/bci_contract?schema=public
+      DIRECT_URL: postgresql://bci:bci@localhost:5432/bci_contract?schema=public
+      NODE_ENV: test
+      JWT_ACCESS_SECRET: ci-only-bci-secret-not-for-production
+      PORT: 3000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm install
+      - run: npx prisma validate
+      - run: npx prisma generate
+      - name: Generate initial SQL from the complete Prisma schema
+        run: npx prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script > /tmp/bci-initial.sql
+      - name: Apply generated SQL to PostgreSQL
+        run: psql "$DATABASE_URL" --file=/tmp/bci-initial.sql
+      - name: Verify database matches Prisma schema
+        run: npx prisma migrate diff --from-schema-datasource prisma/schema.prisma --to-schema-database "$DATABASE_URL" --exit-code
+      - run: npm run build
+      - run: npm test -- --passWithNoTests
+      - name: Upload generated initial SQL
+        uses: actions/upload-artifact@v4
+        with:
+          name: bci-initial-postgres-schema
+          path: /tmp/bci-initial.sql
+          retention-days: 7
