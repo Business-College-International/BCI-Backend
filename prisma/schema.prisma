@@ -91,6 +91,16 @@ model RefreshSession {
   @@index([userId, revokedAt, expiresAt])
 }
 
+model RolePermission {
+  id             String   @id @default(uuid())
+  role           RoleName
+  permissionCode String
+  grantedAt      DateTime @default(now())
+
+  @@unique([role, permissionCode])
+  @@index([permissionCode, role])
+}
+
 model UserRole {
   id         String   @id @default(uuid())
   userId     String
@@ -387,7 +397,7 @@ model Student {
   lastName          String
   dateOfBirth       DateTime
   sex               String?
-  hometown          String?
+  hometown           String?
   region            String?
   passportPhotoUrl  String?
   previousSchool    String?
@@ -607,11 +617,45 @@ model Payment {
   allocations PaymentAllocation[]
   receipt     Receipt?
   refunds     Refund[]
+  attempts    PaymentProviderAttempt[]
 
   @@index([studentId, createdAt])
   @@index([guardianId, createdAt])
   @@index([status, createdAt])
   @@index([provider, providerReference])
+}
+
+model PaymentProviderAttempt {
+  id                String        @id @default(uuid())
+  paymentId         String
+  provider          String
+  providerReference String?
+  status            PaymentStatus @default(PENDING)
+  requestPayload    Json?
+  responsePayload   Json?
+  requestedAt       DateTime      @default(now())
+  resolvedAt        DateTime?
+  failureCode       String?
+  failureMessage    String?
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  @@unique([provider, providerReference])
+  @@index([paymentId, requestedAt])
+}
+
+model ProviderWebhookEvent {
+  id                 String    @id @default(uuid())
+  provider           String
+  eventId            String
+  eventType          String
+  signatureVerified  Boolean   @default(false)
+  payload            Json
+  receivedAt         DateTime  @default(now())
+  processedAt        DateTime?
+  processingError    String?
+
+  @@unique([provider, eventId])
+  @@index([provider, receivedAt])
 }
 
 model PaymentAllocation {
