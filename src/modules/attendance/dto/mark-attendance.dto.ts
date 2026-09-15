@@ -1,4 +1,4 @@
-import { ArrayMinSize, IsArray, IsEnum, IsString, IsUUID, ValidateNested } from 'class-validator';
+import { ArrayMinSize, IsArray, IsEnum, IsOptional, IsString, IsUUID, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { AttendanceStatus } from '@prisma/client';
 
@@ -9,8 +9,9 @@ export class AttendanceMarkDto {
   @IsEnum(AttendanceStatus)
   status!: AttendanceStatus;
 
+  @IsOptional()
   @IsString()
-  note!: string;
+  note?: string;
 }
 
 export class MarkAttendanceDto {
