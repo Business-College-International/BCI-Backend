@@ -3,6 +3,7 @@ import { AcademicReportsModule } from './modules/academic-reports/academic-repor
 import { AcademicsModule } from './modules/academics/academics.module';
 import { AnnouncementsModule } from './modules/announcements/announcements.module';
 import { ApplicationsModule } from './modules/applications/applications.module';
+import { AttendanceAnalyticsModule } from './modules/attendance/attendance-analytics.module';
 import { AttendanceModule } from './modules/attendance/attendance.module';
 import { AssessmentsModule } from './modules/assessments/assessments.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -34,6 +35,7 @@ class HealthController {
     AnnouncementsModule,
     ApplicationsModule,
     AttendanceModule,
+    AttendanceAnalyticsModule,
     AssessmentsModule,
     ConfigurationModule,
     GuardiansModule,
