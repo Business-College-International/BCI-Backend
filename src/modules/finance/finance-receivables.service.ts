@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InvoiceStatus, Prisma, RoleName } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
 import { ListInvoicesDto } from './dto/list-invoices.dto';
@@ -127,7 +127,7 @@ export class FinanceReceivablesService {
 
   private assertManagementScope(roles: RoleName[], actorUserId: string) {
     if (!roles.some((role) => FINANCE_MANAGEMENT_ROLES.has(role))) {
-      throw new BadRequestException(`Finance management access is restricted for user ${actorUserId}.`);
+      throw new ForbiddenException(`Finance management access is restricted for user ${actorUserId}.`);
     }
   }
 }
