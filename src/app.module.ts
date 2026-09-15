@@ -7,6 +7,7 @@ import { AssessmentsModule } from './modules/assessments/assessments.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { FinanceModule } from './modules/finance/finance.module';
 import { GuardiansModule } from './modules/guardians/guardians.module';
+import { PayrollModule } from './modules/payroll/payroll.module';
 import { StaffModule } from './modules/staff/staff.module';
 import { StudentsModule } from './modules/students/students.module';
 
@@ -27,6 +28,7 @@ class HealthController {
     AttendanceModule,
     AssessmentsModule,
     GuardiansModule,
+    PayrollModule,
     StaffModule,
     StudentsModule,
     FinanceModule,
