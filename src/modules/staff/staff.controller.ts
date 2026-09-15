@@ -24,9 +24,8 @@ export class StaffController {
 
   @Get('directory')
   @RequirePermissions(PERMISSIONS.STAFF_READ)
-  async directory(@Req() request: AuthenticatedRequest) {
-    await this.staff.assertStaffReadAccess(request.user.id, request.user.roles);
-    return this.staff.listDirectory();
+  directory(@Req() request: AuthenticatedRequest) {
+    return this.staff.listDirectory(request.user.id, request.user.roles);
   }
 
   @Get(':staffPersonId/assignments')
