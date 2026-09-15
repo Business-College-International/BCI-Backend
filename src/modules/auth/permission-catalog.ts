@@ -1,0 +1,25 @@
+export const PERMISSIONS = {
+  APPLICATIONS_READ: 'applications.read',
+  APPLICATIONS_REVIEW: 'applications.review',
+  APPLICATIONS_ADMIT: 'applications.admit',
+  STUDENTS_READ: 'students.read',
+  STUDENTS_MANAGE: 'students.manage',
+  ACADEMICS_READ: 'academics.read',
+  ACADEMICS_MANAGE: 'academics.manage',
+  ATTENDANCE_READ: 'attendance.read',
+  ATTENDANCE_MANAGE: 'attendance.manage',
+  ASSESSMENTS_READ: 'assessments.read',
+  ASSESSMENTS_MANAGE: 'assessments.manage',
+  FINANCE_READ: 'finance.read',
+  FINANCE_MANAGE: 'finance.manage',
+  PAYMENTS_MANAGE: 'payments.manage',
+  PAYROLL_READ: 'payroll.read',
+  PAYROLL_MANAGE: 'payroll.manage',
+  INVENTORY_READ: 'inventory.read',
+  INVENTORY_MANAGE: 'inventory.manage',
+  ANNOUNCEMENTS_MANAGE: 'announcements.manage',
+  AUDIT_READ: 'audit.read',
+  USERS_MANAGE: 'users.manage',
+} as const;
+
+export type PermissionCode = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
