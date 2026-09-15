@@ -12,6 +12,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { PayrollModule } from './modules/payroll/payroll.module';
 import { StaffModule } from './modules/staff/staff.module';
 import { StationeryModule } from './modules/stationery/stationery.module';
+import { StudentRecordsModule } from './modules/student-records/student-records.module';
 import { StudentsModule } from './modules/students/students.module';
 import { WalletModule } from './modules/wallet/wallet.module';
 
@@ -37,6 +38,7 @@ class HealthController {
     PayrollModule,
     StaffModule,
     StationeryModule,
+    StudentRecordsModule,
     StudentsModule,
     FinanceModule,
     WalletModule,
