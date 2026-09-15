@@ -40,7 +40,7 @@ export class AuthService {
     const user = await this.prisma.$transaction(async (tx) => {
       const existingPerson = await tx.person.findFirst({
         where: { phone },
-        select: { id: true, firstName: true, lastName: true },
+        select: { id: true },
       });
 
       const person = existingPerson
@@ -68,9 +68,7 @@ export class AuthService {
           email,
           passwordHash,
           roles: { create: { role: RoleName.GUARDIAN } },
-          guardian: {
-            create: { personId: person.id },
-          },
+          guardian: { create: { personId: person.id } },
         },
         include: { roles: true },
       });
@@ -96,6 +94,48 @@ export class AuthService {
     }
 
     return this.issueTokens(user.id, user.tokenVersion, user.roles.map((r) => r.role));
+  }
+
+  async getCurrentUser(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        roles: true,
+        directPermissions: { select: { permissionCode: true, scopeType: true, scopeId: true } },
+        person: { select: { id: true, firstName: true, middleName: true, lastName: true, phone: true, email: true, photoUrl: true } },
+        guardian: { select: { personId: true, preferredSms: true, preferredPush: true } },
+        staff: { select: { personId: true, staffIdNo: true, department: true, employmentStatus: true } },
+      },
+    });
+
+    if (!user || user.status !== UserStatus.ACTIVE) {
+      throw new UnauthorizedException('Session is no longer valid.');
+    }
+
+    const roles = user.roles.map((role) => role.role);
+    const [rolePermissions, directPermissions] = await Promise.all([
+      this.prisma.rolePermission.findMany({
+        where: { role: { in: roles } },
+        select: { role: true, permissionCode: true },
+      }),
+      Promise.resolve(user.directPermissions),
+    ]);
+
+    const effectivePermissionCodes = new Set<string>([
+      ...rolePermissions.map((permission) => permission.permissionCode),
+      ...directPermissions.map((permission) => permission.permissionCode),
+    ]);
+
+    return {
+      id: user.id,
+      status: user.status,
+      roles,
+      permissions: Array.from(effectivePermissionCodes).sort(),
+      permissionAssignments: directPermissions,
+      person: user.person,
+      guardian: user.guardian,
+      staff: user.staff,
+    };
   }
 
   async refresh(dto: RefreshDto) {
