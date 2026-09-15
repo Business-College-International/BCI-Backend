@@ -1,6 +1,5 @@
 import {
   BadRequestException,
-  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -31,7 +30,9 @@ export class AttendanceService {
       if (schoolClass.academicYearId !== term.academicYearId) {
         throw new BadRequestException('The class does not belong to the selected term academic year.');
       }
-      if (dto.sessionDate < term.startsAt.toISOString() || dto.sessionDate > term.endsAt.toISOString()) {
+
+      const sessionDate = new Date(dto.sessionDate);
+      if (sessionDate < term.startsAt || sessionDate > term.endsAt) {
         throw new BadRequestException('The attendance session date must fall within the selected term.');
       }
       if (term.status === 'CLOSED') {
@@ -71,14 +72,13 @@ export class AttendanceService {
         }
       }
 
-      const teacherId = staff?.personId ?? undefined;
       const session = await tx.attendanceSession.create({
         data: {
           termId: dto.termId,
           classId: dto.classId,
           subjectId: dto.subjectId,
-          teacherId,
-          sessionDate: new Date(dto.sessionDate),
+          teacherId: staff?.personId,
+          sessionDate,
           periodLabel: dto.periodLabel?.trim(),
           startsAt: dto.startsAt ? new Date(dto.startsAt) : undefined,
           endsAt: dto.endsAt ? new Date(dto.endsAt) : undefined,
@@ -129,7 +129,6 @@ export class AttendanceService {
         throw new BadRequestException('Every marked student must have an active enrolment in the session class and term.');
       }
 
-      const markedBy = actorUserId;
       for (const record of dto.records) {
         await tx.attendanceRecord.upsert({
           where: { sessionId_studentId: { sessionId, studentId: record.studentId } },
@@ -137,12 +136,12 @@ export class AttendanceService {
             sessionId,
             studentId: record.studentId,
             status: record.status,
-            markedBy,
+            markedBy: actorUserId,
             note: record.note?.trim(),
           },
           update: {
             status: record.status,
-            markedBy,
+            markedBy: actorUserId,
             markedAt: new Date(),
             note: record.note?.trim(),
           },
@@ -173,6 +172,9 @@ export class AttendanceService {
   }
 
   async getStudentAttendance(studentId: string, actorUserId: string, roles: RoleName[], termId?: string) {
+    const student = await this.prisma.student.findUnique({ where: { id: studentId }, select: { id: true } });
+    if (!student) throw new NotFoundException('Student not found.');
+
     const scope = await this.resolveStudentScope(studentId, actorUserId, roles);
     if (!scope.allowed) throw new ForbiddenException('You do not have access to this student attendance.');
     if (scope.isGuardian && !scope.canViewAcademic) {
@@ -181,10 +183,13 @@ export class AttendanceService {
 
     const sessions = await this.prisma.attendanceSession.findMany({
       where: {
-        termId: termId ? termId : undefined,
+        ...(termId ? { termId } : {}),
         records: { some: { studentId } },
       },
-      include: { subject: { select: { code: true, name: true } }, records: { where: { studentId }, select: { status: true, markedAt: true, note: true } } },
+      include: {
+        subject: { select: { code: true, name: true } },
+        records: { where: { studentId }, select: { status: true, markedAt: true, note: true } },
+      },
       orderBy: { sessionDate: 'desc' },
     });
 
@@ -213,7 +218,14 @@ export class AttendanceService {
     };
   }
 
-  private async assertSessionAccess(tx: any, classId: string, termId: string, subjectId: string | null, actorUserId: string, roles: RoleName[]) {
+  private async assertSessionAccess(
+    tx: any,
+    classId: string,
+    termId: string,
+    subjectId: string | null,
+    actorUserId: string,
+    roles: RoleName[],
+  ) {
     if (roles.some((role) => PRIVILEGED_ATTENDANCE_ROLES.has(role))) return;
     if (!roles.includes(RoleName.TEACHER)) throw new ForbiddenException('Teacher attendance access is required.');
 
@@ -233,7 +245,9 @@ export class AttendanceService {
   }
 
   private async resolveStudentScope(studentId: string, actorUserId: string, roles: RoleName[]) {
-    if (roles.some((role) => PRIVILEGED_ATTENDANCE_ROLES.has(role))) return { allowed: true, isGuardian: false, canViewAcademic: true };
+    if (roles.some((role) => PRIVILEGED_ATTENDANCE_ROLES.has(role))) {
+      return { allowed: true, isGuardian: false, canViewAcademic: true };
+    }
 
     const guardian = await this.prisma.guardian.findUnique({ where: { userId: actorUserId }, select: { personId: true } });
     if (guardian) {
