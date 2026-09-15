@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, Patch, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { RoleName } from '@prisma/client';
 import { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -7,7 +7,6 @@ import { RequirePermissions } from '../auth/permissions.decorator';
 import { PERMISSIONS } from '../auth/permission-catalog';
 import { StudentsService } from './students.service';
 import { LinkGuardianDto } from './dto/link-guardian.dto';
-import { UpdateGuardianLinkDto } from './dto/update-guardian-link.dto';
 import { WithdrawStudentDto } from './dto/withdraw-student.dto';
 
 type AuthenticatedRequest = Request & {
@@ -38,17 +37,6 @@ export class StudentsController {
     @Req() request: AuthenticatedRequest,
   ) {
     return this.students.linkGuardian(id, request.user.id, dto);
-  }
-
-  @Patch(':id/guardians/:guardianId')
-  @RequirePermissions(PERMISSIONS.STUDENTS_MANAGE)
-  updateGuardianLink(
-    @Param('id') id: string,
-    @Param('guardianId') guardianId: string,
-    @Body() dto: UpdateGuardianLinkDto,
-    @Req() request: AuthenticatedRequest,
-  ) {
-    return this.students.updateGuardianLink(id, guardianId, request.user.id, dto);
   }
 
   @Delete(':id/guardians/:guardianId')
