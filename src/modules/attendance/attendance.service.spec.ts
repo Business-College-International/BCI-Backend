@@ -1,0 +1,91 @@
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { AttendanceStatus, RoleName } from '@prisma/client';
+import { AttendanceService } from './attendance.service';
+
+function makePrisma() {
+  return {
+    student: { findUnique: jest.fn() },
+    guardian: { findUnique: jest.fn() },
+    guardianStudent: { findUnique: jest.fn() },
+    enrolment: { findFirst: jest.fn() },
+    attendanceSession: { findMany: jest.fn() },
+    $transaction: jest.fn(),
+  } as any;
+}
+
+describe('AttendanceService access and integrity', () => {
+  it('rejects a teacher who is not assigned to create a session', async () => {
+    const prisma = makePrisma();
+    const tx = {
+      term: { findUnique: jest.fn() },
+      schoolClass: { findUnique: jest.fn() },
+      staff: { findUnique: jest.fn() },
+      teacherAssignment: { findFirst: jest.fn() },
+      subject: { findUnique: jest.fn() },
+    };
+    prisma.$transaction.mockImplementation(async (callback: (client: typeof tx) => unknown) => callback(tx));
+    tx.term.findUnique.mockResolvedValue({
+      academicYearId: 'year-1',
+      startsAt: new Date('2026-09-01'),
+      endsAt: new Date('2026-12-31'),
+      status: 'OPEN',
+    });
+    tx.schoolClass.findUnique.mockResolvedValue({ academicYearId: 'year-1', level: 'SHS1' });
+    tx.staff.findUnique.mockResolvedValue({ personId: 'teacher-1' });
+    tx.teacherAssignment.findFirst.mockResolvedValue(null);
+
+    const service = new AttendanceService(prisma);
+
+    await expect(service.createSession({
+      termId: 'term-1',
+      classId: 'class-1',
+      sessionDate: '2026-10-01T08:00:00.000Z',
+    }, 'teacher-user-1', [RoleName.TEACHER])).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('rejects marking a student outside the session class and term', async () => {
+    const prisma = makePrisma();
+    const tx = {
+      attendanceSession: { findUnique: jest.fn() },
+      staff: { findUnique: jest.fn() },
+      teacherAssignment: { findFirst: jest.fn() },
+      enrolment: { findMany: jest.fn() },
+    };
+    prisma.$transaction.mockImplementation(async (callback: (client: typeof tx) => unknown) => callback(tx));
+    tx.attendanceSession.findUnique.mockResolvedValue({ id: 'session-1', classId: 'class-1', termId: 'term-1', subjectId: null });
+    tx.staff.findUnique.mockResolvedValue({ personId: 'teacher-1' });
+    tx.teacherAssignment.findFirst.mockResolvedValue({ id: 'assignment-1' });
+    tx.enrolment.findMany.mockResolvedValue([]);
+
+    const service = new AttendanceService(prisma);
+
+    await expect(service.markAttendance('session-1', {
+      records: [{ studentId: 'student-1', status: AttendanceStatus.PRESENT }],
+    }, 'teacher-user-1', [RoleName.TEACHER])).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('denies a guardian who lacks academic visibility', async () => {
+    const prisma = makePrisma();
+    prisma.student.findUnique.mockResolvedValue({ id: 'student-1' });
+    prisma.guardian.findUnique.mockResolvedValue({ personId: 'guardian-person-1' });
+    prisma.guardianStudent.findUnique.mockResolvedValue({ canViewAcademic: false });
+
+    const service = new AttendanceService(prisma);
+
+    await expect(
+      service.getStudentAttendance('student-1', 'guardian-user-1', [RoleName.GUARDIAN]),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('allows privileged school roles to read attendance', async () => {
+    const prisma = makePrisma();
+    prisma.student.findUnique.mockResolvedValue({ id: 'student-1' });
+    prisma.attendanceSession.findMany.mockResolvedValue([]);
+
+    const service = new AttendanceService(prisma);
+
+    await expect(
+      service.getStudentAttendance('student-1', 'principal-user-1', [RoleName.PRINCIPAL]),
+    ).resolves.toMatchObject({ summary: { total: 0 }, sessions: [] });
+  });
+});
