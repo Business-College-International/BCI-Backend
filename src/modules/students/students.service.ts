@@ -2,6 +2,7 @@ import { ConflictException, ForbiddenException, Injectable, NotFoundException } 
 import { RoleName, StudentStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
 import { LinkGuardianDto } from './dto/link-guardian.dto';
+import { ListStudentsDto } from './dto/list-students.dto';
 import { WithdrawStudentDto } from './dto/withdraw-student.dto';
 
 const PRIVILEGED_STUDENT_READ_ROLES = new Set<RoleName>([
@@ -14,6 +15,109 @@ const PRIVILEGED_STUDENT_READ_ROLES = new Set<RoleName>([
 @Injectable()
 export class StudentsService {
   constructor(private readonly prisma: PrismaService) {}
+
+  async listDirectory(userId: string, roles: RoleName[], query: ListStudentsDto) {
+    const isPrivilegedStaff = roles.some((role) => PRIVILEGED_STUDENT_READ_ROLES.has(role));
+    let classScope: string[] | undefined;
+
+    if (!isPrivilegedStaff) {
+      if (!roles.includes(RoleName.TEACHER)) {
+        throw new ForbiddenException('Directory access is restricted to authorized school staff.');
+      }
+
+      const staff = await this.prisma.staff.findUnique({ where: { userId }, select: { personId: true } });
+      if (!staff) throw new ForbiddenException('Teacher access requires an active staff link.');
+
+      const assignments = await this.prisma.teacherAssignment.findMany({
+        where: {
+          staffId: staff.personId,
+          ...(query.termId ? { termId: query.termId } : {}),
+        },
+        select: { classId: true },
+        distinct: ['classId'],
+      });
+      classScope = assignments.map((assignment) => assignment.classId);
+      if (classScope.length === 0) return [];
+    }
+
+    const search = query.q?.trim();
+    const enrolmentFilter = {
+      ...(query.termId ? { termId: query.termId } : {}),
+      ...(query.classId ? { classId: query.classId } : {}),
+      ...(query.level ? { level: query.level } : {}),
+      ...(query.programme ? { programme: query.programme } : {}),
+      ...(classScope ? { classId: { in: classScope } } : {}),
+      ...(query.status ? { status: query.status === StudentStatus.ACTIVE ? 'ACTIVE' : undefined } : {}),
+    };
+
+    const students = await this.prisma.student.findMany({
+      where: {
+        ...(query.status ? { status: query.status } : {}),
+        ...(search
+          ? {
+              OR: [
+                { firstName: { contains: search, mode: 'insensitive' } },
+                { lastName: { contains: search, mode: 'insensitive' } },
+                { admissionNumber: { contains: search, mode: 'insensitive' } },
+              ],
+            }
+          : {}),
+        ...(Object.keys(enrolmentFilter).length > 0 ? { enrolments: { some: enrolmentFilter } } : {}),
+      },
+      include: {
+        guardians: {
+          where: { isPrimaryContact: true },
+          take: 1,
+          include: {
+            guardian: {
+              include: {
+                person: { select: { firstName: true, lastName: true, phone: true, email: true } },
+              },
+            },
+          },
+        },
+        enrolments: {
+          where: { ...(Object.keys(enrolmentFilter).length > 0 ? enrolmentFilter : {}) },
+          orderBy: { enrolledAt: 'desc' },
+          take: 1,
+          include: { academicYear: true, term: true, class: true },
+        },
+      },
+      orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
+      take: 500,
+    });
+
+    return students.map((student) => {
+      const primaryGuardian = student.guardians[0]?.guardian;
+      const enrolment = student.enrolments[0];
+      return {
+        id: student.id,
+        admissionNumber: student.admissionNumber,
+        firstName: student.firstName,
+        lastName: student.lastName,
+        dateOfBirth: student.dateOfBirth,
+        status: student.status,
+        passportPhotoUrl: student.passportPhotoUrl,
+        primaryGuardian: primaryGuardian
+          ? {
+              name: `${primaryGuardian.person.firstName} ${primaryGuardian.person.lastName}`,
+              phone: primaryGuardian.person.phone,
+              email: primaryGuardian.person.email,
+            }
+          : null,
+        enrolment: enrolment
+          ? {
+              academicYear: enrolment.academicYear.name,
+              term: enrolment.term.name,
+              class: enrolment.class.name,
+              level: enrolment.level,
+              programme: enrolment.programme,
+              status: enrolment.status,
+            }
+          : null,
+      };
+    });
+  }
 
   async listMyWards(userId: string) {
     const guardian = await this.prisma.guardian.findUnique({
