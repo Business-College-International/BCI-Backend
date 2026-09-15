@@ -1,4 +1,4 @@
-import { IsEmail, IsOptional, IsString, MaxLength, Matches } from 'class-validator';
+import { IsOptional, IsString, MaxLength } from 'class-validator';
 
 export class UpdateMyProfileDto {
   @IsString()
@@ -8,11 +8,6 @@ export class UpdateMyProfileDto {
   @IsString()
   @MaxLength(100)
   lastName!: string;
-
-  @IsOptional()
-  @IsEmail()
-  @MaxLength(255)
-  email?: string;
 
   @IsOptional()
   @IsString()
@@ -33,10 +28,6 @@ export class UpdateMyProfileDto {
   @IsString()
   @MaxLength(120)
   region?: string;
-
-  @IsOptional()
-  @Matches(/^\+?[0-9 ()-]{7,25}$/)
-  phone?: string;
 
   @IsOptional()
   preferredSms?: boolean;
