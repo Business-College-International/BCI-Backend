@@ -4,6 +4,7 @@ import { AssessmentsService } from './assessments.service';
 
 type MockTx = {
   term: { findUnique: jest.Mock };
+  schoolClass: { findUnique?: jest.Mock };
   subject: { findUnique: jest.Mock };
   staff: { findUnique: jest.Mock };
   teacherAssignment: { findFirst: jest.Mock; findMany: jest.Mock };
@@ -16,6 +17,7 @@ type MockTx = {
 function makeTx(): MockTx {
   return {
     term: { findUnique: jest.fn() },
+    schoolClass: { findUnique: jest.fn() },
     subject: { findUnique: jest.fn() },
     staff: { findUnique: jest.fn() },
     teacherAssignment: { findFirst: jest.fn(), findMany: jest.fn() },
@@ -29,6 +31,9 @@ function makeTx(): MockTx {
 function makePrisma(tx: MockTx): any {
   return {
     $transaction: jest.fn(async (callback: (value: MockTx) => unknown) => callback(tx)),
+    term: tx.term,
+    schoolClass: tx.schoolClass,
+    subject: tx.subject,
     student: { findUnique: jest.fn() },
     guardian: { findUnique: jest.fn() },
     staff: tx.staff,
@@ -87,5 +92,58 @@ describe('AssessmentsService', () => {
     await expect(service.enterResults('assessment-1', {
       results: [{ studentId: 'student-1', score: 51 }],
     }, 'teacher-user', [RoleName.TEACHER])).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
+describe('AssessmentsService assessment roster', () => {
+  function primeRosterMocks(tx: MockTx) {
+    tx.term.findUnique.mockResolvedValue({ id: 'term-1', academicYearId: 'year-1', status: 'OPEN' });
+    tx.schoolClass?.findUnique?.mockResolvedValue({ id: 'class-1', academicYearId: 'year-1', level: 'SHS1' });
+    tx.subject.findUnique.mockResolvedValue({ id: 'subject-1', level: 'SHS1' });
+  }
+
+  it('returns active students for an assigned teacher class/subject', async () => {
+    const tx = makeTx();
+    primeRosterMocks(tx);
+    tx.staff.findUnique.mockResolvedValue({ personId: 'staff-1' });
+    tx.teacherAssignment.findFirst.mockResolvedValue({ id: 'assignment-1' });
+    tx.enrolment.findMany.mockResolvedValue([
+      { student: { id: 'student-1', admissionNumber: 'BCI-001', firstName: 'Ama', lastName: 'Doe', status: 'ACTIVE' } },
+    ]);
+
+    const service = new AssessmentsService(makePrisma(tx));
+    const result = await service.getAssessmentRoster(
+      'class-1', 'term-1', 'subject-1', 'teacher-user', [RoleName.TEACHER],
+    );
+
+    expect(result).toEqual([
+      { id: 'student-1', admissionNumber: 'BCI-001', firstName: 'Ama', lastName: 'Doe', status: 'ACTIVE' },
+    ]);
+  });
+
+  it('denies a teacher who is not assigned to the requested class', async () => {
+    const tx = makeTx();
+    primeRosterMocks(tx);
+    tx.staff.findUnique.mockResolvedValue({ personId: 'staff-1' });
+    tx.teacherAssignment.findFirst.mockResolvedValue(null);
+
+    const service = new AssessmentsService(makePrisma(tx));
+
+    await expect(service.getAssessmentRoster(
+      'class-1', 'term-1', 'subject-1', 'teacher-user', [RoleName.TEACHER],
+    )).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('rejects a class from a different academic year', async () => {
+    const tx = makeTx();
+    tx.term.findUnique.mockResolvedValue({ id: 'term-1', academicYearId: 'year-1', status: 'OPEN' });
+    tx.schoolClass?.findUnique?.mockResolvedValue({ id: 'class-1', academicYearId: 'year-2', level: 'SHS1' });
+    tx.subject.findUnique.mockResolvedValue({ id: 'subject-1', level: 'SHS1' });
+
+    const service = new AssessmentsService(makePrisma(tx));
+
+    await expect(service.getAssessmentRoster(
+      'class-1', 'term-1', 'subject-1', 'teacher-user', [RoleName.TEACHER],
+    )).rejects.toBeInstanceOf(BadRequestException);
   });
 });
