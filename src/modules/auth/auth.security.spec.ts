@@ -7,8 +7,7 @@ describe('AuthService security controls', () => {
   it('rejects an incorrect current password', async () => {
     const prisma = {
       user: { findUnique: jest.fn().mockResolvedValue({ id: 'user-1', passwordHash: await bcrypt.hash('CorrectPassword1!', 4), tokenVersion: 1, status: UserStatus.ACTIVE }) },
-      refreshSession: { updateMany: jest.fn() },
-      auditLog: { create: jest.fn() },
+      refreshSession: { updateMany: jest.fn() }, auditLog: { create: jest.fn() },
       $transaction: jest.fn(async (callback: (tx: any) => unknown) => callback({ user: { update: jest.fn() }, refreshSession: { updateMany: jest.fn() }, auditLog: { create: jest.fn() } })),
     };
     const service = new AuthService(prisma as never, { signAsync: jest.fn() } as never);
@@ -31,6 +30,16 @@ describe('AuthService security controls', () => {
     expect(tx.user.update).toHaveBeenCalledWith({ where: { id: 'user-1' }, data: expect.objectContaining({ tokenVersion: 5 }) });
     expect(tx.refreshSession.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { userId: 'user-1', revokedAt: null } }));
     expect(tx.auditLog.create).toHaveBeenCalled();
+  });
+
+  it('immediately invalidates access tokens when all sessions are revoked', async () => {
+    const tx = { user: { update: jest.fn() }, refreshSession: { updateMany: jest.fn().mockResolvedValue({ count: 4 }) }, auditLog: { create: jest.fn() } };
+    const prisma = { user: { findUnique: jest.fn().mockResolvedValue({ id: 'user-1', tokenVersion: 7, status: UserStatus.ACTIVE }) }, refreshSession: {}, auditLog: {}, $transaction: jest.fn(async (callback: (tx: any) => unknown) => callback(tx)) };
+    const service = new AuthService(prisma as never, { signAsync: jest.fn() } as never);
+    await expect(service.revokeAllSessions('user-1')).resolves.toEqual({ success: true, revokedCount: 4 });
+    expect(tx.user.update).toHaveBeenCalledWith({ where: { id: 'user-1' }, data: { tokenVersion: 8 } });
+    expect(tx.refreshSession.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { userId: 'user-1', revokedAt: null } }));
+    expect(tx.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ entityType: 'UserSecurity', afterJson: expect.objectContaining({ action: 'ALL_SESSIONS_REVOKED' }) }) }));
   });
 
   it('does not allow revoking another user session', async () => {
