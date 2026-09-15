@@ -47,7 +47,7 @@ export class StudentsService {
       ...(query.level ? { level: query.level } : {}),
       ...(query.programme ? { programme: query.programme } : {}),
       ...(classScope ? { classId: { in: classScope } } : {}),
-      ...(query.status ? { status: query.status === StudentStatus.ACTIVE ? 'ACTIVE' : undefined } : {}),
+      ...(query.status === StudentStatus.ACTIVE ? { status: 'ACTIVE' as const } : {}),
     };
 
     const students = await this.prisma.student.findMany({
