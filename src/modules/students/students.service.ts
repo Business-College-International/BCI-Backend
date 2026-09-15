@@ -56,8 +56,9 @@ export class StudentsService {
           },
         },
         enrolments: {
+          where: { status: 'ACTIVE' },
           orderBy: { enrolledAt: 'desc' },
-          take: 3,
+          take: 1,
           include: { academicYear: true, term: true, class: true },
         },
         documents: { select: { id: true, type: true, fileUrl: true, createdAt: true } },
@@ -68,11 +69,71 @@ export class StudentsService {
 
     const isPrivilegedStaff = roles.some((role) => PRIVILEGED_STUDENT_READ_ROLES.has(role));
     const isLinkedGuardian = student.guardians.some((link) => link.guardian.userId === userId);
+    const isTeacher = roles.includes(RoleName.TEACHER);
 
-    if (!isPrivilegedStaff && !isLinkedGuardian) {
-      throw new ForbiddenException('You do not have access to this student.');
+    if (isPrivilegedStaff || isLinkedGuardian) {
+      return this.toActorView(student, true);
     }
 
+    if (isTeacher) {
+      const enrolment = student.enrolments[0];
+      const staff = await this.prisma.staff.findUnique({
+        where: { userId },
+        select: { personId: true },
+      });
+
+      if (!staff || !enrolment) {
+        throw new ForbiddenException('Teacher access requires an active staff link and student enrolment.');
+      }
+
+      const assignment = await this.prisma.teacherAssignment.findFirst({
+        where: {
+          staffId: staff.personId,
+          classId: enrolment.classId,
+          termId: enrolment.termId,
+        },
+        select: { id: true },
+      });
+
+      if (!assignment) {
+        throw new ForbiddenException('You are not assigned to this student\'s class for the active term.');
+      }
+
+      return this.toActorView(student, false);
+    }
+
+    throw new ForbiddenException('You do not have access to this student.');
+  }
+
+  private toActorView(student: {
+    id: string;
+    admissionNumber: string | null;
+    firstName: string;
+    lastName: string;
+    dateOfBirth: Date;
+    sex: string | null;
+    hometown: string | null;
+    region: string | null;
+    passportPhotoUrl: string | null;
+    previousSchool: string | null;
+    status: string;
+    admittedAt: Date | null;
+    guardians: Array<{ relationship: string; isPrimaryContact: boolean; guardian: { userId: string | null } }>;
+    enrolments: Array<{
+      id: string;
+      status: string;
+      enrolledAt: Date;
+      completedAt: Date | null;
+      classId: string;
+      termId: string;
+      level: string;
+      programme: string;
+      academicYear: { id: string; name: string };
+      term: { id: string; code: string; name: string };
+      class: { id: string; name: string; level: string; programme: string };
+    }>;
+    documents: Array<{ id: string; type: string; fileUrl: string; createdAt: Date }>;
+  }, includeDocuments: boolean) {
     return {
       student: this.toStudentView(student),
       guardians: student.guardians.map((link) => ({
@@ -100,7 +161,7 @@ export class StudentsService {
           programme: enrolment.programme,
         },
       })),
-      documents: isPrivilegedStaff ? student.documents : [],
+      documents: includeDocuments ? student.documents : [],
     };
   }
 
