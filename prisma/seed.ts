@@ -20,6 +20,7 @@ const permissionsByRole: Record<RoleName, readonly string[]> = {
     PERMISSIONS.ANNOUNCEMENTS_MANAGE,
     PERMISSIONS.STAFF_READ,
     PERMISSIONS.STAFF_MANAGE,
+    PERMISSIONS.WALLET_READ,
   ],
   [RoleName.OFFICE]: [
     PERMISSIONS.APPLICATIONS_READ,
@@ -31,6 +32,7 @@ const permissionsByRole: Record<RoleName, readonly string[]> = {
     PERMISSIONS.ANNOUNCEMENTS_MANAGE,
     PERMISSIONS.STAFF_READ,
     PERMISSIONS.STAFF_MANAGE,
+    PERMISSIONS.WALLET_READ,
   ],
   [RoleName.ACCOUNTANT]: [
     PERMISSIONS.STUDENTS_READ,
@@ -41,6 +43,7 @@ const permissionsByRole: Record<RoleName, readonly string[]> = {
     PERMISSIONS.PAYROLL_MANAGE,
     PERMISSIONS.INVENTORY_READ,
     PERMISSIONS.STAFF_READ,
+    PERMISSIONS.WALLET_READ,
   ],
   [RoleName.TEACHER]: [
     PERMISSIONS.STUDENTS_READ,
@@ -60,6 +63,7 @@ const permissionsByRole: Record<RoleName, readonly string[]> = {
     PERMISSIONS.STUDENTS_READ,
     PERMISSIONS.ATTENDANCE_READ,
     PERMISSIONS.ASSESSMENTS_READ,
+    PERMISSIONS.WALLET_READ,
   ],
   [RoleName.APPLICANT]: [
     PERMISSIONS.APPLICATIONS_READ,
