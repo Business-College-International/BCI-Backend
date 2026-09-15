@@ -7,6 +7,7 @@ import { RequirePermissions } from '../auth/permissions.decorator';
 import { PERMISSIONS } from '../auth/permission-catalog';
 import { CreateFeeScheduleDto } from './dto/create-fee-schedule.dto';
 import { IssueInvoiceDto } from './dto/issue-invoice.dto';
+import { ListFeeSchedulesDto } from './dto/list-fee-schedules.dto';
 import { FinanceService } from './finance.service';
 
 type AuthenticatedRequest = Request & { user: { id: string; roles: RoleName[] } };
@@ -19,10 +20,10 @@ export class FinanceController {
   @Get('fee-schedules')
   @RequirePermissions(PERMISSIONS.FINANCE_READ)
   listFeeSchedules(
-    @Query('termId') termId: string,
+    @Query() query: ListFeeSchedulesDto,
     @Req() request: AuthenticatedRequest,
   ) {
-    return this.finance.listFeeSchedules(termId, request.user.id, request.user.roles);
+    return this.finance.listFeeSchedules(query.termId, request.user.id, request.user.roles);
   }
 
   @Post('fee-schedules')
