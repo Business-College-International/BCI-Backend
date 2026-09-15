@@ -1,7 +1,10 @@
-import { Body, Controller, ForbiddenException, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { RoleName } from '@prisma/client';
 import { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { PermissionsGuard } from '../auth/permissions.guard';
+import { RequirePermissions } from '../auth/permissions.decorator';
+import { PERMISSIONS } from '../auth/permission-catalog';
 import { CreateAcademicYearDto } from './dto/create-academic-year.dto';
 import { CreateClassDto } from './dto/create-class.dto';
 import { CreateTermDto } from './dto/create-term.dto';
@@ -10,44 +13,36 @@ import { AcademicsService } from './academics.service';
 type AuthenticatedRequest = Request & { user: { id: string; roles: RoleName[] } };
 
 @Controller()
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 export class AcademicsController {
   constructor(private readonly academics: AcademicsService) {}
 
-  @UseGuards(JwtAuthGuard)
+  @RequirePermissions(PERMISSIONS.ACADEMICS_READ)
   @Get('academic-years')
   listAcademicYears() { return this.academics.listAcademicYears(); }
 
-  @UseGuards(JwtAuthGuard)
+  @RequirePermissions(PERMISSIONS.ACADEMICS_MANAGE)
   @Post('academic-years')
   createAcademicYear(@Body() dto: CreateAcademicYearDto, @Req() request: AuthenticatedRequest) {
-    this.requireRole(request, [RoleName.DIRECTOR, RoleName.PRINCIPAL, RoleName.OFFICE]);
     return this.academics.createAcademicYear(dto, request.user.id);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @RequirePermissions(PERMISSIONS.ACADEMICS_MANAGE)
   @Post('academic-years/:id/terms')
   createTerm(@Param('id') id: string, @Body() dto: CreateTermDto, @Req() request: AuthenticatedRequest) {
-    this.requireRole(request, [RoleName.DIRECTOR, RoleName.PRINCIPAL, RoleName.OFFICE]);
     return this.academics.createTerm(id, dto, request.user.id);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @RequirePermissions(PERMISSIONS.ACADEMICS_READ)
   @Get('school-classes')
-  listClasses(@Req() request: Request) {
+  listClasses(@Req() request: AuthenticatedRequest) {
     const academicYearId = typeof request.query.academicYearId === 'string' ? request.query.academicYearId : undefined;
-    return this.academics.listClasses(academicYearId);
+    return this.academics.listClasses(academicYearId, request.user.id, request.user.roles);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @RequirePermissions(PERMISSIONS.ACADEMICS_MANAGE)
   @Post('school-classes')
   createClass(@Body() dto: CreateClassDto, @Req() request: AuthenticatedRequest) {
-    this.requireRole(request, [RoleName.DIRECTOR, RoleName.PRINCIPAL, RoleName.OFFICE]);
     return this.academics.createClass(dto, request.user.id);
-  }
-
-  private requireRole(request: AuthenticatedRequest, allowed: RoleName[]) {
-    if (!allowed.some((role) => request.user.roles.includes(role))) {
-      throw new ForbiddenException('You do not have permission to manage academic structure.');
-    }
   }
 }
