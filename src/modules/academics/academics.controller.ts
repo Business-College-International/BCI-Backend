@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import { RoleName } from '@prisma/client';
 import { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -8,6 +8,8 @@ import { PERMISSIONS } from '../auth/permission-catalog';
 import { CreateAcademicYearDto } from './dto/create-academic-year.dto';
 import { CreateClassDto } from './dto/create-class.dto';
 import { CreateTermDto } from './dto/create-term.dto';
+import { TransitionTermDto } from './dto/transition-term.dto';
+import { UpdateClassDto } from './dto/update-class.dto';
 import { AcademicsService } from './academics.service';
 
 type AuthenticatedRequest = Request & { user: { id: string; roles: RoleName[] } };
@@ -28,9 +30,21 @@ export class AcademicsController {
   }
 
   @RequirePermissions(PERMISSIONS.ACADEMICS_MANAGE)
+  @Post('academic-years/:id/current')
+  setCurrentAcademicYear(@Param('id') id: string, @Req() request: AuthenticatedRequest) {
+    return this.academics.setCurrentAcademicYear(id, request.user.id);
+  }
+
+  @RequirePermissions(PERMISSIONS.ACADEMICS_MANAGE)
   @Post('academic-years/:id/terms')
   createTerm(@Param('id') id: string, @Body() dto: CreateTermDto, @Req() request: AuthenticatedRequest) {
     return this.academics.createTerm(id, dto, request.user.id);
+  }
+
+  @RequirePermissions(PERMISSIONS.ACADEMICS_MANAGE)
+  @Patch('terms/:id/status')
+  transitionTerm(@Param('id') id: string, @Body() dto: TransitionTermDto, @Req() request: AuthenticatedRequest) {
+    return this.academics.transitionTerm(id, dto.status, request.user.id);
   }
 
   @RequirePermissions(PERMISSIONS.ACADEMICS_READ)
@@ -44,5 +58,11 @@ export class AcademicsController {
   @Post('school-classes')
   createClass(@Body() dto: CreateClassDto, @Req() request: AuthenticatedRequest) {
     return this.academics.createClass(dto, request.user.id);
+  }
+
+  @RequirePermissions(PERMISSIONS.ACADEMICS_MANAGE)
+  @Patch('school-classes/:id')
+  updateClass(@Param('id') id: string, @Body() dto: UpdateClassDto, @Req() request: AuthenticatedRequest) {
+    return this.academics.updateClass(id, dto, request.user.id);
   }
 }
