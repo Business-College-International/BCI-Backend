@@ -1,4 +1,5 @@
 import { Controller, Get, Module } from '@nestjs/common';
+import { AcademicsModule } from './modules/academics/academics.module';
 import { ApplicationsModule } from './modules/applications/applications.module';
 import { AuthModule } from './modules/auth/auth.module';
 
@@ -11,7 +12,7 @@ class HealthController {
 }
 
 @Module({
-  imports: [AuthModule, ApplicationsModule],
+  imports: [AuthModule, AcademicsModule, ApplicationsModule],
   controllers: [HealthController],
 })
 export class AppModule {}
