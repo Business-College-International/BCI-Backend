@@ -11,8 +11,8 @@ export class ApplicationsController {
     return this.applications.create(dto);
   }
 
-  @Get(':id/status')
-  getStatus(@Param('id') id: string) {
-    return this.applications.findOne(id);
+  @Get('track/:trackingCode')
+  getStatus(@Param('trackingCode') trackingCode: string) {
+    return this.applications.findByTrackingCode(trackingCode);
   }
 }
