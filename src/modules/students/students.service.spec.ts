@@ -2,12 +2,17 @@ import { ForbiddenException } from '@nestjs/common';
 import { RoleName } from '@prisma/client';
 import { StudentsService } from './students.service';
 
-function makePrisma(overrides: Record<string, unknown> = {}) {
+type MockPrisma = {
+  guardian: { findUnique: jest.Mock };
+  student: { findUnique: jest.Mock };
+};
+
+function makePrisma(overrides: Partial<MockPrisma> = {}): MockPrisma {
   return {
     guardian: { findUnique: jest.fn() },
     student: { findUnique: jest.fn() },
     ...overrides,
-  } as never;
+  };
 }
 
 describe('StudentsService access boundaries', () => {
@@ -36,7 +41,7 @@ describe('StudentsService access boundaries', () => {
       ],
     });
 
-    const service = new StudentsService(prisma);
+    const service = new StudentsService(prisma as never);
     const wards = await service.listMyWards('guardian-user-1');
 
     expect(prisma.guardian.findUnique).toHaveBeenCalledWith(
@@ -68,7 +73,7 @@ describe('StudentsService access boundaries', () => {
       documents: [],
     });
 
-    const service = new StudentsService(prisma);
+    const service = new StudentsService(prisma as never);
 
     await expect(
       service.getByActor('student-2', 'guardian-user-1', [RoleName.GUARDIAN]),
@@ -95,7 +100,7 @@ describe('StudentsService access boundaries', () => {
       documents: [],
     });
 
-    const service = new StudentsService(prisma);
+    const service = new StudentsService(prisma as never);
     await expect(
       service.getByActor('student-3', 'office-user-1', [RoleName.OFFICE]),
     ).resolves.toMatchObject({ student: { id: 'student-3' } });
