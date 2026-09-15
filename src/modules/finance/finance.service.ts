@@ -10,6 +10,7 @@ import { randomBytes } from 'node:crypto';
 import { PrismaService } from '../../prisma.service';
 import { CreateFeeScheduleDto } from './dto/create-fee-schedule.dto';
 import { IssueInvoiceDto } from './dto/issue-invoice.dto';
+import { FinanceSummaryDto } from './dto/finance-summary.dto';
 
 const PRIVILEGED_FINANCE_ROLES = new Set<RoleName>([
   RoleName.DIRECTOR,
@@ -204,6 +205,128 @@ export class FinanceService {
     });
 
     return invoices.map((invoice) => this.toInvoiceView(invoice, invoice.allocations));
+  }
+
+  async listStudentReceipts(studentId: string, actorUserId: string, roles: RoleName[]) {
+    const scope = await this.resolveStudentFinanceScope(studentId, actorUserId, roles);
+    if (!scope.allowed) throw new ForbiddenException("You do not have access to this student's payment history.");
+    if (scope.isGuardian && !scope.canPayFees) {
+      throw new ForbiddenException('This guardian is not permitted to view payment history for this ward.');
+    }
+
+    const payments = await this.prisma.payment.findMany({
+      where: { studentId, status: 'SUCCEEDED' },
+      include: {
+        receipt: true,
+        allocations: {
+          include: {
+            invoice: { select: { invoiceNumber: true, termId: true } },
+          },
+        },
+      },
+      orderBy: { completedAt: 'desc' },
+    });
+
+    return payments.map((payment) => ({
+      paymentId: payment.id,
+      amount: payment.amount.toFixed(2),
+      currency: payment.currency,
+      purpose: payment.purpose,
+      completedAt: payment.completedAt,
+      provider: payment.provider,
+      providerReference: payment.providerReference,
+      receipt: payment.receipt
+        ? {
+            id: payment.receipt.id,
+            receiptNumber: payment.receipt.receiptNumber,
+            fileUrl: payment.receipt.fileUrl,
+            issuedAt: payment.receipt.issuedAt,
+          }
+        : null,
+      allocations: payment.allocations.map((allocation) => ({
+        invoiceId: allocation.invoiceId,
+        invoiceNumber: allocation.invoice.invoiceNumber,
+        termId: allocation.invoice.termId,
+        amount: allocation.amount.toFixed(2),
+      })),
+    }));
+  }
+
+  async getFinanceSummary(dto: FinanceSummaryDto, actorUserId: string, roles: RoleName[]) {
+    this.assertFinanceReadScope(actorUserId, roles);
+    const from = dto.from ? new Date(dto.from) : undefined;
+    const to = dto.to ? new Date(dto.to) : undefined;
+    if (from && to && from > to) throw new BadRequestException('The summary start date must not be after the end date.');
+
+    const invoiceWhere: Prisma.StudentInvoiceWhereInput = {
+      ...(dto.termId ? { termId: dto.termId } : {}),
+      ...(from || to
+        ? { issuedAt: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } }
+        : {}),
+    };
+
+    const invoices = await this.prisma.studentInvoice.findMany({
+      where: invoiceWhere,
+      include: { lines: true, allocations: { include: { payment: { select: { status: true } } } } },
+    });
+
+    const totals = invoices.reduce(
+      (acc, invoice) => {
+        const due = invoice.lines.reduce((sum, line) => sum.plus(line.amountDue), new Prisma.Decimal(0));
+        const paid = invoice.allocations.reduce((sum, allocation) => sum.plus(allocation.amount), new Prisma.Decimal(0));
+        acc.invoiced = acc.invoiced.plus(due);
+        acc.paidAllocated = acc.paidAllocated.plus(paid);
+        acc.outstanding = acc.outstanding.plus(due.minus(paid));
+        acc[invoice.status] = (acc[invoice.status] ?? 0) + 1;
+        return acc;
+      },
+      {
+        invoiced: new Prisma.Decimal(0),
+        paidAllocated: new Prisma.Decimal(0),
+        outstanding: new Prisma.Decimal(0),
+        OPEN: 0,
+        PARTIALLY_PAID: 0,
+        PAID: 0,
+        VOID: 0,
+      } as Record<string, Prisma.Decimal | number>,
+    );
+
+    const payments = await this.prisma.payment.findMany({
+      where: {
+        status: { in: ['PENDING', 'PROCESSING', 'SUCCEEDED', 'FAILED', 'CANCELLED', 'REFUNDED'] },
+        ...(from || to
+          ? { createdAt: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } }
+          : {}),
+        ...(dto.termId ? { allocations: { some: { invoice: { termId: dto.termId } } } } : {}),
+      },
+      select: { status: true, amount: true },
+    });
+
+    const collected = payments
+      .filter((payment) => payment.status === 'SUCCEEDED')
+      .reduce((sum, payment) => sum.plus(payment.amount), new Prisma.Decimal(0));
+    const pending = payments
+      .filter((payment) => payment.status === 'PENDING' || payment.status === 'PROCESSING')
+      .reduce((sum, payment) => sum.plus(payment.amount), new Prisma.Decimal(0));
+
+    return {
+      filters: { termId: dto.termId ?? null, from: from?.toISOString() ?? null, to: to?.toISOString() ?? null },
+      invoices: {
+        count: invoices.length,
+        open: totals.OPEN as number,
+        partiallyPaid: totals.PARTIALLY_PAID as number,
+        paid: totals.PAID as number,
+        void: totals.VOID as number,
+        invoicedAmount: (totals.invoiced as Prisma.Decimal).toFixed(2),
+        allocatedAmount: (totals.paidAllocated as Prisma.Decimal).toFixed(2),
+        outstandingAmount: (totals.outstanding as Prisma.Decimal).toFixed(2),
+      },
+      payments: {
+        collectedAmount: collected.toFixed(2),
+        pendingAmount: pending.toFixed(2),
+        totalPaymentRecords: payments.length,
+      },
+    };
   }
 
   private async resolveStudentFinanceScope(studentId: string, actorUserId: string, roles: RoleName[]) {
