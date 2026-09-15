@@ -25,6 +25,23 @@ export class AssessmentsController {
     return this.assessments.createAssessment(dto, request.user.id, request.user.roles);
   }
 
+  @Get('roster')
+  @RequirePermissions(PERMISSIONS.ASSESSMENTS_READ)
+  getRoster(
+    @Query('classId') classId: string,
+    @Query('termId') termId: string,
+    @Query('subjectId') subjectId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.assessments.getAssessmentRoster(
+      classId,
+      termId,
+      subjectId,
+      request.user.id,
+      request.user.roles,
+    );
+  }
+
   @Post(':assessmentId/results')
   @RequirePermissions(PERMISSIONS.ASSESSMENTS_MANAGE)
   enterResults(
