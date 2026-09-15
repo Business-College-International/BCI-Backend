@@ -1,5 +1,5 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { RoleName } from '@prisma/client';
+import { RoleName, TermStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
 
 const PRIVILEGED_ROLES = new Set<RoleName>([
@@ -11,6 +11,23 @@ const PRIVILEGED_ROLES = new Set<RoleName>([
 @Injectable()
 export class AcademicReportsService {
   constructor(private readonly prisma: PrismaService) {}
+
+  async getCurrentStudentTermSummary(studentId: string, actorUserId: string, roles: RoleName[]) {
+    const currentYear = await this.prisma.academicYear.findFirst({
+      where: { isCurrent: true },
+      select: { id: true },
+    });
+    if (!currentYear) throw new NotFoundException('No current academic year is configured.');
+
+    const currentTerm = await this.prisma.term.findFirst({
+      where: { academicYearId: currentYear.id, status: TermStatus.OPEN },
+      orderBy: { startsAt: 'desc' },
+      select: { id: true },
+    });
+    if (!currentTerm) throw new NotFoundException('No open term is configured for the current academic year.');
+
+    return this.getStudentTermSummary(studentId, currentTerm.id, actorUserId, roles);
+  }
 
   async getStudentTermSummary(studentId: string, termId: string, actorUserId: string, roles: RoleName[]) {
     const student = await this.prisma.student.findUnique({
