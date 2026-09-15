@@ -21,6 +21,8 @@ export const PERMISSIONS = {
   AUDIT_READ: 'audit.read',
   STAFF_READ: 'staff.read',
   STAFF_MANAGE: 'staff.manage',
+  WALLET_READ: 'wallet.read',
+  WALLET_MANAGE: 'wallet.manage',
   USERS_MANAGE: 'users.manage',
 } as const;
 
