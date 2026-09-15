@@ -19,6 +19,8 @@ export const PERMISSIONS = {
   INVENTORY_MANAGE: 'inventory.manage',
   ANNOUNCEMENTS_MANAGE: 'announcements.manage',
   AUDIT_READ: 'audit.read',
+  STAFF_READ: 'staff.read',
+  STAFF_MANAGE: 'staff.manage',
   USERS_MANAGE: 'users.manage',
 } as const;
 
