@@ -1,5 +1,5 @@
-import { ConflictException, ForbiddenException } from '@nestjs/common';
-import { RoleName } from '@prisma/client';
+import { ForbiddenException } from '@nestjs/common';
+import { Prisma, RoleName } from '@prisma/client';
 import { StationeryService } from './stationery.service';
 
 function makeTx() {
@@ -35,7 +35,7 @@ describe('StationeryService', () => {
     const tx = makeTx();
     tx.guardian.findUnique.mockResolvedValue({ personId: 'guardian-1' });
     tx.guardianStudent.findUnique.mockResolvedValue({ canPayFees: true });
-    tx.stationeryItem.findMany.mockResolvedValue([{ id: 'item-1', sku: 'PEN-01', name: 'Pen', price: { mul: () => ({}) } }]);
+    tx.stationeryItem.findMany.mockResolvedValue([{ id: 'item-1', sku: 'PEN-01', name: 'Pen', price: new Prisma.Decimal(2) }]);
     tx.stationeryOrder.create.mockResolvedValue({ id: 'order-1', status: 'DRAFT' });
     const prisma = { $transaction: jest.fn(async (callback: (value: typeof tx) => unknown) => callback(tx)) };
     const service = new StationeryService(prisma as never);
