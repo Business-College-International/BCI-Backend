@@ -1,4 +1,4 @@
-import { Controller, Get, Param, ParseUUIDPipe, Query, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, ParseUUIDPipe, Req, UseGuards } from '@nestjs/common';
 import { RoleName } from '@prisma/client';
 import { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -13,6 +13,15 @@ type AuthenticatedRequest = Request & { user: { id: string; roles: RoleName[] } 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 export class AcademicReportsController {
   constructor(private readonly reports: AcademicReportsService) {}
+
+  @Get('students/:studentId/current')
+  @RequirePermissions(PERMISSIONS.ASSESSMENTS_READ)
+  getCurrentStudentTermSummary(
+    @Param('studentId', new ParseUUIDPipe()) studentId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.reports.getCurrentStudentTermSummary(studentId, request.user.id, request.user.roles);
+  }
 
   @Get('students/:studentId/terms/:termId')
   @RequirePermissions(PERMISSIONS.ASSESSMENTS_READ)
