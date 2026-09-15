@@ -1,6 +1,12 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { ApplicationStatus } from '@prisma/client';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { AdmissionDecision, ApplicationStatus, RoleName } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
+import { AdmitApplicationDto } from './dto/admit-application.dto';
 import { CreateApplicationDto } from './dto/create-application.dto';
 
 @Injectable()
@@ -45,22 +51,177 @@ export class ApplicationsService {
     return application;
   }
 
-  async review(id: string, status: Exclude<ApplicationStatus, 'PENDING'>) {
-    if (![
-      ApplicationStatus.UNDER_REVIEW,
-      ApplicationStatus.ADMITTED,
-      ApplicationStatus.REJECTED,
-    ].includes(status)) {
-      throw new Error('Unsupported review status');
-    }
-
-    return this.prisma.application.update({
-      where: { id },
-      data: { status },
+  async listForStaff() {
+    return this.prisma.application.findMany({
+      orderBy: { submittedAt: 'desc' },
       select: {
         id: true,
+        trackingCode: true,
+        firstName: true,
+        lastName: true,
+        dob: true,
+        levelApplied: true,
+        programmeApplied: true,
+        guardianName: true,
+        guardianPhone: true,
         status: true,
+        submittedAt: true,
+        updatedAt: true,
       },
+    });
+  }
+
+  async review(id: string, status: ApplicationStatus.UNDER_REVIEW | ApplicationStatus.REJECTED, reason: string | undefined, actorUserId: string) {
+    const current = await this.prisma.application.findUnique({ where: { id } });
+    if (!current) throw new NotFoundException('Application not found');
+    if (![ApplicationStatus.PENDING, ApplicationStatus.UNDER_REVIEW].includes(current.status)) {
+      throw new ConflictException('This application is already in a terminal state.');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.application.update({
+        where: { id },
+        data: { status, reviewedBy: actorUserId },
+        select: { id: true, trackingCode: true, status: true, updatedAt: true },
+      });
+
+      await tx.admissionDecisionRecord.create({
+        data: {
+          applicationId: id,
+          decision: status === ApplicationStatus.REJECTED ? AdmissionDecision.REJECTED : AdmissionDecision.ADMITTED,
+          decidedBy: actorUserId,
+          reason,
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          actorUserId,
+          action: status === ApplicationStatus.REJECTED ? 'REJECT' : 'UPDATE',
+          entityType: 'Application',
+          entityId: id,
+          beforeJson: { status: current.status },
+          afterJson: { status },
+        },
+      });
+
+      return updated;
+    });
+  }
+
+  async admit(id: string, dto: AdmitApplicationDto, actorUserId: string) {
+    const current = await this.prisma.application.findUnique({ where: { id } });
+    if (!current) throw new NotFoundException('Application not found');
+    if (current.status !== ApplicationStatus.UNDER_REVIEW) {
+      throw new ConflictException('Only applications under review can be admitted.');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const academicYear = await tx.academicYear.findUnique({ where: { id: dto.academicYearId } });
+      const term = await tx.term.findUnique({ where: { id: dto.termId } });
+      const schoolClass = await tx.schoolClass.findUnique({ where: { id: dto.classId } });
+
+      if (!academicYear || !term || !schoolClass) {
+        throw new NotFoundException('Academic year, term, or class was not found.');
+      }
+      if (term.academicYearId !== academicYear.id) {
+        throw new BadRequestException('The selected term does not belong to the selected academic year.');
+      }
+      if (schoolClass.level !== current.levelApplied || schoolClass.programme !== current.programmeApplied) {
+        throw new BadRequestException('The selected class does not match the application level/programme.');
+      }
+      if (term.status !== 'OPEN') {
+        throw new BadRequestException('The selected term is not open for enrolment.');
+      }
+
+      const existingStudent = await tx.student.findUnique({ where: { applicationId: id } });
+      if (existingStudent) throw new ConflictException('This application has already created a student.');
+
+      const applicationTransition = await tx.application.updateMany({
+        where: { id, status: ApplicationStatus.UNDER_REVIEW },
+        data: { status: ApplicationStatus.ADMITTED, reviewedBy: actorUserId },
+      });
+      if (applicationTransition.count !== 1) {
+        throw new ConflictException('Application changed while it was being admitted.');
+      }
+
+      const student = await tx.student.create({
+        data: {
+          applicationId: id,
+          firstName: current.firstName,
+          lastName: current.lastName,
+          dateOfBirth: current.dob,
+          passportPhotoUrl: current.passportPhotoUrl,
+          previousSchool: current.previousSchool,
+          admittedAt: new Date(),
+          admissionNumber: dto.admissionNumber?.trim() || undefined,
+        },
+      });
+
+      const guardianPhone = current.guardianPhone.trim();
+      const guardianUser = await tx.user.findUnique({ where: { phone: guardianPhone } });
+      let guardianPersonId: string;
+
+      if (guardianUser?.personId) {
+        guardianPersonId = guardianUser.personId;
+        await tx.guardian.upsert({
+          where: { personId: guardianPersonId },
+          create: { personId: guardianPersonId, userId: guardianUser.id },
+          update: { userId: guardianUser.id },
+        });
+      } else {
+        const guardianPerson = await tx.person.create({
+          data: {
+            firstName: current.guardianName.split(' ')[0] || current.guardianName,
+            lastName: current.guardianName.split(' ').slice(1).join(' ') || 'Guardian',
+            phone: guardianPhone,
+          },
+        });
+        guardianPersonId = guardianPerson.id;
+        await tx.guardian.create({ data: { personId: guardianPersonId } });
+      }
+
+      await tx.guardianStudent.create({
+        data: {
+          guardianId: guardianPersonId,
+          studentId: student.id,
+          relationship: 'guardian',
+          isPrimaryContact: true,
+        },
+      });
+
+      const enrolment = await tx.enrolment.create({
+        data: {
+          studentId: student.id,
+          academicYearId: academicYear.id,
+          termId: term.id,
+          classId: schoolClass.id,
+          level: current.levelApplied,
+          programme: current.programmeApplied,
+          status: 'ACTIVE',
+        },
+      });
+
+      await tx.admissionDecisionRecord.create({
+        data: {
+          applicationId: id,
+          decision: AdmissionDecision.ADMITTED,
+          decidedBy: actorUserId,
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          actorUserId,
+          action: 'APPROVE',
+          entityType: 'Application',
+          entityId: id,
+          beforeJson: { status: ApplicationStatus.UNDER_REVIEW },
+          afterJson: { status: ApplicationStatus.ADMITTED, studentId: student.id, enrolmentId: enrolment.id },
+        },
+      });
+
+      return { applicationId: id, student, enrolment };
     });
   }
 }
