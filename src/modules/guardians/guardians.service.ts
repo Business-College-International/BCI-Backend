@@ -38,7 +38,7 @@ export class GuardiansService {
     if (!guardian) throw new NotFoundException('Guardian profile not found.');
 
     const phone = dto.phone?.trim() || guardian.person.phone;
-    const email = dto.email?.trim().toLowerCase();
+    const email = dto.email?.trim().toLowerCase() ?? guardian.person.email;
 
     if (phone && phone !== guardian.user?.phone) {
       const existingPhone = await this.prisma.user.findUnique({ where: { phone } });
@@ -116,7 +116,19 @@ export class GuardiansService {
         },
       });
 
-      return this.getMyProfile(userId);
+      return {
+        firstName: person.firstName,
+        middleName: person.middleName,
+        lastName: person.lastName,
+        phone: person.phone,
+        email: person.email,
+        address: person.address,
+        occupation: person.occupation,
+        hometown: person.hometown,
+        region: person.region,
+        preferredSms: updatedGuardian.preferredSms,
+        preferredPush: updatedGuardian.preferredPush,
+      };
     });
   }
 }
