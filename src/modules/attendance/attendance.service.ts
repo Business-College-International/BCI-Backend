@@ -104,6 +104,62 @@ export class AttendanceService {
     });
   }
 
+  async getSessionRoster(sessionId: string, actorUserId: string, roles: RoleName[]) {
+    const session = await this.prisma.attendanceSession.findUnique({
+      where: { id: sessionId },
+      include: { class: { select: { id: true, name: true } }, records: true },
+    });
+    if (!session) throw new NotFoundException('Attendance session not found.');
+
+    await this.assertSessionAccess(
+      this.prisma,
+      session.classId,
+      session.termId,
+      session.subjectId,
+      actorUserId,
+      roles,
+    );
+
+    const enrolments = await this.prisma.enrolment.findMany({
+      where: { classId: session.classId, termId: session.termId, status: 'ACTIVE' },
+      orderBy: [{ student: { lastName: 'asc' } }, { student: { firstName: 'asc' } }],
+      select: {
+        student: {
+          select: {
+            id: true,
+            admissionNumber: true,
+            firstName: true,
+            lastName: true,
+            passportPhotoUrl: true,
+            status: true,
+          },
+        },
+      },
+    });
+
+    const records = new Map(session.records.map((record) => [record.studentId, record]));
+
+    return {
+      session: {
+        id: session.id,
+        class: session.class,
+        termId: session.termId,
+        subjectId: session.subjectId,
+        sessionDate: session.sessionDate,
+        periodLabel: session.periodLabel,
+      },
+      roster: enrolments.map(({ student }) => {
+        const record = records.get(student.id);
+        return {
+          student,
+          attendance: record
+            ? { status: record.status, note: record.note, markedAt: record.markedAt }
+            : null,
+        };
+      }),
+    };
+  }
+
   async markAttendance(sessionId: string, dto: MarkAttendanceDto, actorUserId: string, roles: RoleName[]) {
     return this.prisma.$transaction(async (tx) => {
       const session = await tx.attendanceSession.findUnique({ where: { id: sessionId } });
@@ -219,7 +275,7 @@ export class AttendanceService {
   }
 
   private async assertSessionAccess(
-    tx: any,
+    tx: PrismaService,
     classId: string,
     termId: string,
     subjectId: string | null,
