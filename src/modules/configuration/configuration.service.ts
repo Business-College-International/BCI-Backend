@@ -20,12 +20,11 @@ export class ConfigurationService {
     this.assertRole(roles, ACADEMIC_MANAGERS, 'Subject management is restricted to school academic managers.');
     if (!dto.isElective && dto.programme !== Programme.NONE) throw new ConflictException('A subject tied to a programme should be marked elective.');
     try {
-      const subject = await this.prisma.$transaction(async (tx) => {
+      return await this.prisma.$transaction(async (tx) => {
         const created = await tx.subject.create({ data: { code: dto.code.trim().toUpperCase(), name: dto.name.trim(), level: dto.level, isElective: dto.isElective ?? false, programme: dto.programme } });
         await tx.auditLog.create({ data: { actorUserId, action: 'CREATE', entityType: 'Subject', entityId: created.id, afterJson: { code: created.code, level: created.level, programme: created.programme, isElective: created.isElective } } });
         return created;
       });
-      return subject;
     } catch (error) {
       if ((error as { code?: string }).code === 'P2002') throw new ConflictException('A subject with that code already exists.');
       throw error;
@@ -34,22 +33,21 @@ export class ConfigurationService {
 
   async updateSubject(id: string, dto: UpdateSubjectDto, actorUserId: string, roles: RoleName[]) {
     this.assertRole(roles, ACADEMIC_MANAGERS, 'Subject management is restricted to school academic managers.');
-    const before = await this.prisma.subject.findUnique({ where: { id } });
+    const before = await this.prisma.subject.findUnique({ where: { id }, include: { assignments: { select: { id: true }, take: 1 } } });
     if (!before) throw new NotFoundException('Subject not found.');
     const nextProgramme = dto.programme ?? before.programme;
     const nextElective = dto.isElective ?? before.isElective;
     if (!nextElective && nextProgramme !== Programme.NONE) throw new ConflictException('A subject tied to a programme should be marked elective.');
     if (dto.level && dto.level !== before.level && before.assignments.length > 0) throw new ConflictException('A subject already used in teaching assignments cannot change level.');
-    const updated = await this.prisma.$transaction(async (tx) => {
+    return this.prisma.$transaction(async (tx) => {
       const subject = await tx.subject.update({ where: { id }, data: { name: dto.name?.trim(), level: dto.level, isElective: dto.isElective, programme: dto.programme, isActive: dto.isActive } });
       await tx.auditLog.create({ data: { actorUserId, action: 'UPDATE', entityType: 'Subject', entityId: id, beforeJson: { name: before.name, level: before.level, programme: before.programme, isElective: before.isElective, isActive: before.isActive }, afterJson: { name: subject.name, level: subject.level, programme: subject.programme, isElective: subject.isElective, isActive: subject.isActive } } });
       return subject;
     });
-    return updated;
   }
 
   async listFeeSchedules(termId: string, roles: RoleName[]) {
-    if (!roles.some((role) => [...FINANCE_MANAGERS, ...ACADEMIC_MANAGERS].includes(role))) throw new ForbiddenException('Fee schedule access is restricted.');
+    if (!roles.some((role) => FINANCE_MANAGERS.has(role) || ACADEMIC_MANAGERS.has(role))) throw new ForbiddenException('Fee schedule access is restricted.');
     return this.prisma.feeSchedule.findMany({ where: { termId }, orderBy: [{ level: 'asc' }, { programme: 'asc' }, { itemCode: 'asc' }] });
   }
 
