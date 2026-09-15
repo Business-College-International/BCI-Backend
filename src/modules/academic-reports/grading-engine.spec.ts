@@ -17,6 +17,10 @@ describe('grading engine', () => {
     expect(resolveGrade(100, POLICY).code).toBe('A');
   });
 
+  it('keeps values just below a cutoff in the lower band', () => {
+    expect(resolveGrade(49.9999999995, POLICY).code).toBe('F');
+  });
+
   it('rejects gaps between bands', () => {
     expect(() => validateGradeBands([
       POLICY[0],
