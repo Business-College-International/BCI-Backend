@@ -1,8 +1,9 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { RoleName } from '@prisma/client';
+import { RoleName, TermStatus } from '@prisma/client';
 import { CreateAcademicYearDto } from './dto/create-academic-year.dto';
 import { CreateClassDto } from './dto/create-class.dto';
 import { CreateTermDto } from './dto/create-term.dto';
+import { UpdateClassDto } from './dto/update-class.dto';
 import { PrismaService } from '../../prisma.service';
 
 const PRIVILEGED_ACADEMIC_READ_ROLES = new Set<RoleName>([
@@ -17,7 +18,7 @@ export class AcademicsService {
   constructor(private readonly prisma: PrismaService) {}
 
   listAcademicYears() {
-    return this.prisma.academicYear.findMany({ orderBy: { startsAt: 'desc' }, include: { terms: true } });
+    return this.prisma.academicYear.findMany({ orderBy: { startsAt: 'desc' }, include: { terms: { orderBy: { startsAt: 'asc' } } } });
   }
 
   async createAcademicYear(dto: CreateAcademicYearDto, actorUserId: string) {
@@ -43,6 +44,26 @@ export class AcademicsService {
     });
   }
 
+  async setCurrentAcademicYear(id: string, actorUserId: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const year = await tx.academicYear.findUnique({ where: { id } });
+      if (!year) throw new NotFoundException('Academic year not found.');
+      await tx.academicYear.updateMany({ data: { isCurrent: false } });
+      const updated = await tx.academicYear.update({ where: { id }, data: { isCurrent: true } });
+      await tx.auditLog.create({
+        data: {
+          actorUserId,
+          action: 'UPDATE',
+          entityType: 'AcademicYear',
+          entityId: id,
+          beforeJson: { isCurrent: year.isCurrent },
+          afterJson: { isCurrent: true },
+        },
+      });
+      return updated;
+    });
+  }
+
   async createTerm(academicYearId: string, dto: CreateTermDto, actorUserId: string) {
     const startsAt = new Date(dto.startsAt);
     const endsAt = new Date(dto.endsAt);
@@ -55,7 +76,7 @@ export class AcademicsService {
         throw new BadRequestException('Term dates must fall within the academic year.');
       }
       if (dto.status === 'OPEN') {
-        await tx.term.updateMany({ where: { academicYearId }, data: { status: 'CLOSED' } });
+        await tx.term.updateMany({ where: { academicYearId }, data: { status: TermStatus.CLOSED } });
       }
       try {
         const term = await tx.term.create({
@@ -75,6 +96,37 @@ export class AcademicsService {
         if ((error as { code?: string }).code === 'P2002') throw new ConflictException('A term with that code already exists for this academic year.');
         throw error;
       }
+    });
+  }
+
+  async transitionTerm(id: string, status: TermStatus, actorUserId: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const term = await tx.term.findUnique({ where: { id }, include: { academicYear: true } });
+      if (!term) throw new NotFoundException('Term not found.');
+
+      const allowed = term.status === TermStatus.DRAFT && status === TermStatus.OPEN
+        ? true
+        : term.status === TermStatus.OPEN && status === TermStatus.CLOSED;
+      if (!allowed) {
+        throw new ConflictException(`Invalid term transition from ${term.status} to ${status}.`);
+      }
+
+      if (status === TermStatus.OPEN) {
+        await tx.term.updateMany({ where: { academicYearId: term.academicYearId }, data: { status: TermStatus.CLOSED } });
+      }
+
+      const updated = await tx.term.update({ where: { id }, data: { status } });
+      await tx.auditLog.create({
+        data: {
+          actorUserId,
+          action: 'UPDATE',
+          entityType: 'Term',
+          entityId: id,
+          beforeJson: { status: term.status },
+          afterJson: { status },
+        },
+      });
+      return updated;
     });
   }
 
@@ -110,6 +162,7 @@ export class AcademicsService {
   async createClass(dto: CreateClassDto, actorUserId: string) {
     const year = await this.prisma.academicYear.findUnique({ where: { id: dto.academicYearId } });
     if (!year) throw new NotFoundException('Academic year not found.');
+    if (dto.capacity !== undefined && dto.capacity < 1) throw new BadRequestException('Class capacity must be at least 1.');
     if (dto.level.startsWith('SHS') && dto.programme === 'NONE') {
       throw new BadRequestException('SHS classes must have a programme.');
     }
@@ -146,5 +199,40 @@ export class AcademicsService {
       if ((error as { code?: string }).code === 'P2002') throw new ConflictException('A class with that name already exists for this academic year.');
       throw error;
     }
+  }
+
+  async updateClass(id: string, dto: UpdateClassDto, actorUserId: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const current = await tx.schoolClass.findUnique({ where: { id } });
+      if (!current) throw new NotFoundException('Class not found.');
+
+      if (dto.capacity !== undefined) {
+        const activeCount = await tx.enrolment.count({ where: { classId: id, status: 'ACTIVE' } });
+        if (dto.capacity < activeCount) throw new ConflictException(`Capacity cannot be reduced below the ${activeCount} active enrolments currently assigned to this class.`);
+      }
+
+      const updated = await tx.schoolClass.update({
+        where: { id },
+        data: {
+          name: dto.name?.trim(),
+          division: dto.division?.trim(),
+          room: dto.room?.trim(),
+          capacity: dto.capacity,
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          actorUserId,
+          action: 'UPDATE',
+          entityType: 'SchoolClass',
+          entityId: id,
+          beforeJson: { name: current.name, division: current.division, room: current.room, capacity: current.capacity },
+          afterJson: { name: updated.name, division: updated.division, room: updated.room, capacity: updated.capacity },
+        },
+      });
+
+      return updated;
+    });
   }
 }
