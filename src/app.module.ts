@@ -10,6 +10,7 @@ import { ConfigurationModule } from './modules/configuration/configuration.modul
 import { FinanceModule } from './modules/finance/finance.module';
 import { GuardiansModule } from './modules/guardians/guardians.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { PaymentProvidersModule } from './modules/payment-providers/payment-providers.module';
 import { PayrollModule } from './modules/payroll/payroll.module';
 import { StaffModule } from './modules/staff/staff.module';
 import { StationeryModule } from './modules/stationery/stationery.module';
@@ -37,6 +38,7 @@ class HealthController {
     ConfigurationModule,
     GuardiansModule,
     NotificationsModule,
+    PaymentProvidersModule,
     PayrollModule,
     StaffModule,
     StationeryModule,
