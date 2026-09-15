@@ -2,12 +2,18 @@ import { UnauthorizedException } from '@nestjs/common';
 import { RoleName, UserStatus } from '@prisma/client';
 import { AuthService } from './auth.service';
 
-function makePrisma() {
+type MockPrisma = {
+  user: { findUnique: jest.Mock };
+  rolePermission: { findMany: jest.Mock };
+  $transaction: jest.Mock;
+};
+
+function makePrisma(): MockPrisma {
   return {
     user: { findUnique: jest.fn() },
     rolePermission: { findMany: jest.fn() },
     $transaction: jest.fn(),
-  } as never;
+  };
 }
 
 describe('AuthService current-user contract', () => {
@@ -37,7 +43,7 @@ describe('AuthService current-user contract', () => {
       { role: RoleName.DIRECTOR, permissionCode: 'finance.read' },
     ]);
 
-    const service = new AuthService(prisma, { signAsync: jest.fn() } as never);
+    const service = new AuthService(prisma as never, { signAsync: jest.fn() } as never);
     const result = await service.getCurrentUser('user-1');
 
     expect(result.roles).toEqual([RoleName.DIRECTOR]);
@@ -60,7 +66,7 @@ describe('AuthService current-user contract', () => {
       staff: null,
     });
 
-    const service = new AuthService(prisma, { signAsync: jest.fn() } as never);
+    const service = new AuthService(prisma as never, { signAsync: jest.fn() } as never);
 
     await expect(service.getCurrentUser('user-2')).rejects.toBeInstanceOf(UnauthorizedException);
   });
