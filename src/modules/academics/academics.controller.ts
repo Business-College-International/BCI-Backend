@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { RoleName } from '@prisma/client';
 import { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -25,13 +25,16 @@ export class AcademicsController {
 
   @UseGuards(JwtAuthGuard)
   @Post('academic-years/:id/terms')
-  createTerm(@Body() dto: CreateTermDto, @Req() request: AuthenticatedRequest, @Req() request2: AuthenticatedRequest) {
+  createTerm(@Param('id') id: string, @Body() dto: CreateTermDto, @Req() request: AuthenticatedRequest) {
     this.requireRole(request, [RoleName.DIRECTOR, RoleName.PRINCIPAL, RoleName.OFFICE]);
-    return this.academics.createTerm(request2.params.id, dto, request.user.id);
+    return this.academics.createTerm(id, dto, request.user.id);
   }
 
   @Get('school-classes')
-  listClasses(@Req() request: Request) { return this.academics.listClasses(typeof request.query.academicYearId === 'string' ? request.query.academicYearId : undefined); }
+  listClasses(@Req() request: Request) {
+    const academicYearId = typeof request.query.academicYearId === 'string' ? request.query.academicYearId : undefined;
+    return this.academics.listClasses(academicYearId);
+  }
 
   @UseGuards(JwtAuthGuard)
   @Post('school-classes')
@@ -42,7 +45,7 @@ export class AcademicsController {
 
   private requireRole(request: AuthenticatedRequest, allowed: RoleName[]) {
     if (!allowed.some((role) => request.user.roles.includes(role))) {
-      throw new Error('Forbidden');
+      throw new ForbiddenException('You do not have permission to manage academic structure.');
     }
   }
 }
