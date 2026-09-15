@@ -71,8 +71,12 @@ export class StudentsService {
     const isLinkedGuardian = student.guardians.some((link) => link.guardian.userId === userId);
     const isTeacher = roles.includes(RoleName.TEACHER);
 
-    if (isPrivilegedStaff || isLinkedGuardian) {
+    if (isPrivilegedStaff) {
       return this.toActorView(student, true);
+    }
+
+    if (isLinkedGuardian) {
+      return this.toActorView(student, false);
     }
 
     if (isTeacher) {
