@@ -8,6 +8,7 @@ import { PERMISSIONS } from '../auth/permission-catalog';
 import { CreateFeeScheduleDto } from './dto/create-fee-schedule.dto';
 import { IssueInvoiceDto } from './dto/issue-invoice.dto';
 import { ListFeeSchedulesDto } from './dto/list-fee-schedules.dto';
+import { FinanceSummaryDto } from './dto/finance-summary.dto';
 import { FinanceService } from './finance.service';
 
 type AuthenticatedRequest = Request & { user: { id: string; roles: RoleName[] } };
@@ -44,11 +45,28 @@ export class FinanceController {
     return this.finance.issueInvoice(dto, request.user.id);
   }
 
+  @Get('summary')
+  @RequirePermissions(PERMISSIONS.FINANCE_READ)
+  getSummary(
+    @Query() query: FinanceSummaryDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.finance.getFinanceSummary(query, request.user.id, request.user.roles);
+  }
+
   @Get('students/:studentId/invoices')
   listStudentInvoices(
     @Param('studentId') studentId: string,
     @Req() request: AuthenticatedRequest,
   ) {
     return this.finance.listStudentInvoices(studentId, request.user.id, request.user.roles);
+  }
+
+  @Get('students/:studentId/receipts')
+  listStudentReceipts(
+    @Param('studentId') studentId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.finance.listStudentReceipts(studentId, request.user.id, request.user.roles);
   }
 }
