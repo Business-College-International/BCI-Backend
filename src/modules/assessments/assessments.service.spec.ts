@@ -1,0 +1,91 @@
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { AssessmentType, RoleName } from '@prisma/client';
+import { AssessmentsService } from './assessments.service';
+
+type MockTx = {
+  term: { findUnique: jest.Mock };
+  subject: { findUnique: jest.Mock };
+  staff: { findUnique: jest.Mock };
+  teacherAssignment: { findFirst: jest.Mock; findMany: jest.Mock };
+  assessment: { create: jest.Mock; findUnique: jest.Mock };
+  enrolment: { findMany: jest.Mock };
+  assessmentResult: { upsert: jest.Mock; findMany: jest.Mock };
+  auditLog: { create: jest.Mock };
+};
+
+function makeTx(): MockTx {
+  return {
+    term: { findUnique: jest.fn() },
+    subject: { findUnique: jest.fn() },
+    staff: { findUnique: jest.fn() },
+    teacherAssignment: { findFirst: jest.fn(), findMany: jest.fn() },
+    assessment: { create: jest.fn(), findUnique: jest.fn() },
+    enrolment: { findMany: jest.fn() },
+    assessmentResult: { upsert: jest.fn(), findMany: jest.fn() },
+    auditLog: { create: jest.fn() },
+  };
+}
+
+function makePrisma(tx: MockTx): any {
+  return {
+    $transaction: jest.fn(async (callback: (value: MockTx) => unknown) => callback(tx)),
+    student: { findUnique: jest.fn() },
+    guardian: { findUnique: jest.fn() },
+    staff: tx.staff,
+    enrolment: tx.enrolment,
+    teacherAssignment: tx.teacherAssignment,
+    assessmentResult: { findMany: jest.fn() },
+  };
+}
+
+describe('AssessmentsService', () => {
+  it('denies a teacher who is not assigned to the subject', async () => {
+    const tx = makeTx();
+    tx.term.findUnique.mockResolvedValue({ id: 'term-1', status: 'OPEN' });
+    tx.subject.findUnique.mockResolvedValue({ id: 'subject-1' });
+    tx.staff.findUnique.mockResolvedValue({ personId: 'staff-1' });
+    tx.teacherAssignment.findFirst.mockResolvedValue(null);
+
+    const service = new AssessmentsService(makePrisma(tx));
+
+    await expect(service.createAssessment({
+      termId: 'term-1',
+      subjectId: 'subject-1',
+      title: 'Mid Term Test',
+      type: AssessmentType.TEST,
+      maxScore: 50,
+    }, 'teacher-user', [RoleName.TEACHER])).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('rejects a result for a student outside the teacher assigned class', async () => {
+    const tx = makeTx();
+    tx.assessment.findUnique.mockResolvedValue({ id: 'assessment-1', termId: 'term-1', subjectId: 'subject-1', maxScore: 50 });
+    tx.staff.findUnique.mockResolvedValue({ personId: 'staff-1' });
+    tx.teacherAssignment.findFirst.mockResolvedValue({ id: 'assignment-1' });
+    tx.enrolment.findMany.mockResolvedValue([
+      { studentId: 'student-1', classId: 'class-outside-scope' },
+    ]);
+    tx.teacherAssignment.findMany.mockResolvedValue([{ classId: 'class-assigned' }]);
+
+    const service = new AssessmentsService(makePrisma(tx));
+
+    await expect(service.enterResults('assessment-1', {
+      results: [{ studentId: 'student-1', score: 45 }],
+    }, 'teacher-user', [RoleName.TEACHER])).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects a score above the assessment maximum', async () => {
+    const tx = makeTx();
+    tx.assessment.findUnique.mockResolvedValue({ id: 'assessment-1', termId: 'term-1', subjectId: 'subject-1', maxScore: 50 });
+    tx.staff.findUnique.mockResolvedValue({ personId: 'staff-1' });
+    tx.teacherAssignment.findFirst.mockResolvedValue({ id: 'assignment-1' });
+    tx.enrolment.findMany.mockResolvedValue([{ studentId: 'student-1', classId: 'class-assigned' }]);
+    tx.teacherAssignment.findMany.mockResolvedValue([{ classId: 'class-assigned' }]);
+
+    const service = new AssessmentsService(makePrisma(tx));
+
+    await expect(service.enterResults('assessment-1', {
+      results: [{ studentId: 'student-1', score: 51 }],
+    }, 'teacher-user', [RoleName.TEACHER])).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
