@@ -18,6 +18,14 @@ describe('calculateCompensation', () => {
     });
   });
 
+  it('rejects malformed compensation JSON instead of silently treating it as zero', () => {
+    expect(() => calculateCompensation({
+      basePay: new Prisma.Decimal('5000.00'),
+      allowances: { amount: '500.00' },
+      deductions: [],
+    })).toThrow('Allowances must be an array of compensation lines.');
+  });
+
   it('rejects a calculation that would produce negative net pay', () => {
     expect(() => calculateCompensation({
       basePay: new Prisma.Decimal('100.00'),
