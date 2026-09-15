@@ -25,7 +25,7 @@ export class WalletService {
       throw new ForbiddenException('You do not have access to this student wallet.');
     }
     if (scope.isGuardian && !scope.canManageWallet) {
-      throw new ForbiddenException('This guardian is not permitted to view or manage this ward wallet.');
+      throw new ForbiddenException('This guardian is not permitted to view this ward wallet.');
     }
 
     const wallet = await this.prisma.wallet.findUnique({
@@ -43,24 +43,18 @@ export class WalletService {
         student,
         exists: false,
         currency: 'GHS',
-        balance: '0.00',
+        balance: null,
+        balanceStatus: 'LEDGER_POLICY_REQUIRED',
         transactions: [],
       };
     }
-
-    const balance = wallet.transactions.reduce((total, transaction) => {
-      const amount = Number(transaction.amount.toString());
-      if (transaction.type === 'TOP_UP') return total + amount;
-      if (transaction.type === 'WITHDRAWAL') return total - amount;
-      if (transaction.type === 'REVERSAL') return total + amount;
-      return total;
-    }, 0);
 
     return {
       student,
       exists: true,
       currency: wallet.currency,
-      balance: balance.toFixed(2),
+      balance: null,
+      balanceStatus: 'LEDGER_POLICY_REQUIRED',
       transactions: wallet.transactions.map((transaction) => ({
         id: transaction.id,
         type: transaction.type,
