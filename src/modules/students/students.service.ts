@@ -1,6 +1,7 @@
 import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { RoleName, StudentStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
+import { LinkGuardianDto } from './dto/link-guardian.dto';
 import { WithdrawStudentDto } from './dto/withdraw-student.dto';
 
 const PRIVILEGED_STUDENT_READ_ROLES = new Set<RoleName>([
@@ -38,10 +39,26 @@ export class StudentsService {
 
     if (!guardian) throw new NotFoundException('Guardian profile not found.');
 
-    return guardian.wards.map(({ student, relationship, isPrimaryContact }) => ({
-      student: this.toStudentView(student),
+    return guardian.wards.map(({ student, relationship, isPrimaryContact, canViewAcademic, canPayFees, canManageWallet }) => ({
+      student: canViewAcademic
+        ? this.toStudentView(student)
+        : {
+            id: student.id,
+            admissionNumber: student.admissionNumber,
+            firstName: student.firstName,
+            lastName: student.lastName,
+            dateOfBirth: student.dateOfBirth,
+            sex: student.sex,
+            hometown: student.hometown,
+            region: student.region,
+            passportPhotoUrl: student.passportPhotoUrl,
+            previousSchool: student.previousSchool,
+            status: student.status,
+            admittedAt: student.admittedAt,
+          },
       relationship,
       isPrimaryContact,
+      permissions: { canViewAcademic, canPayFees, canManageWallet },
     }));
   }
 
@@ -51,8 +68,12 @@ export class StudentsService {
       include: {
         guardians: {
           select: {
+            id: true,
             relationship: true,
             isPrimaryContact: true,
+            canViewAcademic: true,
+            canPayFees: true,
+            canManageWallet: true,
             guardian: { select: { userId: true } },
           },
         },
@@ -69,15 +90,15 @@ export class StudentsService {
     if (!student) throw new NotFoundException('Student not found.');
 
     const isPrivilegedStaff = roles.some((role) => PRIVILEGED_STUDENT_READ_ROLES.has(role));
-    const isLinkedGuardian = student.guardians.some((link) => link.guardian.userId === userId);
+    const linkedGuardian = student.guardians.find((link) => link.guardian.userId === userId);
     const isTeacher = roles.includes(RoleName.TEACHER);
 
     if (isPrivilegedStaff) {
-      return this.toActorView(student, true);
+      return this.toActorView(student, true, true);
     }
 
-    if (isLinkedGuardian) {
-      return this.toActorView(student, false);
+    if (linkedGuardian) {
+      return this.toActorView(student, false, linkedGuardian.canViewAcademic);
     }
 
     if (isTeacher) {
@@ -104,10 +125,95 @@ export class StudentsService {
         throw new ForbiddenException('You are not assigned to this student\'s class for the active term.');
       }
 
-      return this.toActorView(student, false);
+      return this.toActorView(student, false, true);
     }
 
     throw new ForbiddenException('You do not have access to this student.');
+  }
+
+  async linkGuardian(studentId: string, actorUserId: string, dto: LinkGuardianDto) {
+    return this.prisma.$transaction(async (tx) => {
+      const [student, guardian] = await Promise.all([
+        tx.student.findUnique({ where: { id: studentId }, select: { id: true, status: true } }),
+        tx.guardian.findUnique({ where: { personId: dto.guardianId }, select: { personId: true, userId: true } }),
+      ]);
+
+      if (!student) throw new NotFoundException('Student not found.');
+      if (student.status !== StudentStatus.ACTIVE) throw new ConflictException('Only active students can receive guardian links.');
+      if (!guardian) throw new NotFoundException('Guardian profile not found.');
+
+      const existing = await tx.guardianStudent.findUnique({
+        where: { guardianId_studentId: { guardianId: guardian.personId, studentId } },
+      });
+      if (existing) throw new ConflictException('This guardian is already linked to the student.');
+
+      if (dto.isPrimaryContact) {
+        await tx.guardianStudent.updateMany({ where: { studentId }, data: { isPrimaryContact: false } });
+      }
+
+      const link = await tx.guardianStudent.create({
+        data: {
+          guardianId: guardian.personId,
+          studentId,
+          relationship: dto.relationship.trim(),
+          isPrimaryContact: dto.isPrimaryContact ?? false,
+          canViewAcademic: dto.canViewAcademic ?? true,
+          canPayFees: dto.canPayFees ?? true,
+          canManageWallet: dto.canManageWallet ?? true,
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          actorUserId,
+          action: 'CREATE',
+          entityType: 'GuardianStudent',
+          entityId: link.id,
+          afterJson: {
+            studentId,
+            guardianId: guardian.personId,
+            relationship: link.relationship,
+            isPrimaryContact: link.isPrimaryContact,
+            canViewAcademic: link.canViewAcademic,
+            canPayFees: link.canPayFees,
+            canManageWallet: link.canManageWallet,
+          },
+        },
+      });
+
+      return link;
+    });
+  }
+
+  async removeGuardian(studentId: string, guardianId: string, actorUserId: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const link = await tx.guardianStudent.findUnique({
+        where: { guardianId_studentId: { guardianId, studentId } },
+      });
+      if (!link) throw new NotFoundException('Guardian link not found.');
+
+      await tx.guardianStudent.delete({ where: { id: link.id } });
+
+      await tx.auditLog.create({
+        data: {
+          actorUserId,
+          action: 'DELETE',
+          entityType: 'GuardianStudent',
+          entityId: link.id,
+          beforeJson: {
+            studentId,
+            guardianId,
+            relationship: link.relationship,
+            isPrimaryContact: link.isPrimaryContact,
+            canViewAcademic: link.canViewAcademic,
+            canPayFees: link.canPayFees,
+            canManageWallet: link.canManageWallet,
+          },
+        },
+      });
+
+      return { success: true };
+    });
   }
 
   async withdraw(studentId: string, actorUserId: string, dto: WithdrawStudentDto) {
@@ -156,10 +262,7 @@ export class StudentsService {
           entityId: studentId,
           beforeJson: {
             status: student.status,
-            enrolment: {
-              id: activeEnrolment.id,
-              status: activeEnrolment.status,
-            },
+            enrolment: { id: activeEnrolment.id, status: activeEnrolment.status },
           },
           afterJson: {
             status: updatedStudent.status,
@@ -173,10 +276,7 @@ export class StudentsService {
       });
 
       return {
-        student: {
-          id: updatedStudent.id,
-          status: updatedStudent.status,
-        },
+        student: { id: updatedStudent.id, status: updatedStudent.status },
         enrolment: {
           id: updatedEnrolment.id,
           status: updatedEnrolment.status,
@@ -187,62 +287,69 @@ export class StudentsService {
     });
   }
 
-  private toActorView(student: {
-    id: string;
-    admissionNumber: string | null;
-    firstName: string;
-    lastName: string;
-    dateOfBirth: Date;
-    sex: string | null;
-    hometown: string | null;
-    region: string | null;
-    passportPhotoUrl: string | null;
-    previousSchool: string | null;
-    status: string;
-    admittedAt: Date | null;
-    guardians: Array<{ relationship: string; isPrimaryContact: boolean; guardian: { userId: string | null } }>;
-    enrolments: Array<{
+  private toActorView(
+    student: {
       id: string;
+      admissionNumber: string | null;
+      firstName: string;
+      lastName: string;
+      dateOfBirth: Date;
+      sex: string | null;
+      hometown: string | null;
+      region: string | null;
+      passportPhotoUrl: string | null;
+      previousSchool: string | null;
       status: string;
-      enrolledAt: Date;
-      completedAt: Date | null;
-      classId: string;
-      termId: string;
-      level: string;
-      programme: string;
-      academicYear: { id: string; name: string };
-      term: { id: string; code: string; name: string };
-      class: { id: string; name: string; level: string; programme: string };
-    }>;
-    documents: Array<{ id: string; type: string; fileUrl: string; createdAt: Date }>;
-  }, includeDocuments: boolean) {
+      admittedAt: Date | null;
+      guardians: Array<{
+        id: string;
+        relationship: string;
+        isPrimaryContact: boolean;
+        canViewAcademic: boolean;
+        canPayFees: boolean;
+        canManageWallet: boolean;
+        guardian: { userId: string | null };
+      }>;
+      enrolments: Array<{
+        id: string;
+        status: string;
+        enrolledAt: Date;
+        completedAt: Date | null;
+        classId: string;
+        termId: string;
+        level: string;
+        programme: string;
+        academicYear: { id: string; name: string };
+        term: { id: string; code: string; name: string };
+        class: { id: string; name: string; level: string; programme: string };
+      }>;
+      documents: Array<{ id: string; type: string; fileUrl: string; createdAt: Date }>;
+    },
+    includeDocuments: boolean,
+    includeAcademic: boolean,
+  ) {
     return {
       student: this.toStudentView(student),
       guardians: student.guardians.map((link) => ({
         relationship: link.relationship,
         isPrimaryContact: link.isPrimaryContact,
       })),
-      enrolments: student.enrolments.map((enrolment) => ({
-        id: enrolment.id,
-        status: enrolment.status,
-        enrolledAt: enrolment.enrolledAt,
-        completedAt: enrolment.completedAt,
-        academicYear: {
-          id: enrolment.academicYear.id,
-          name: enrolment.academicYear.name,
-        },
-        term: {
-          id: enrolment.term.id,
-          code: enrolment.term.code,
-          name: enrolment.term.name,
-        },
-        class: {
-          id: enrolment.class.id,
-          name: enrolment.class.name,
-          level: enrolment.level,
-          programme: enrolment.programme,
-        },
-      })),
+      enrolments: includeAcademic
+        ? student.enrolments.map((enrolment) => ({
+            id: enrolment.id,
+            status: enrolment.status,
+            enrolledAt: enrolment.enrolledAt,
+            completedAt: enrolment.completedAt,
+            academicYear: { id: enrolment.academicYear.id, name: enrolment.academicYear.name },
+            term: { id: enrolment.term.id, code: enrolment.term.code, name: enrolment.term.name },
+            class: {
+              id: enrolment.class.id,
+              name: enrolment.class.name,
+              level: enrolment.level,
+              programme: enrolment.programme,
+            },
+          }))
+        : [],
       documents: includeDocuments ? student.documents : [],
     };
   }
