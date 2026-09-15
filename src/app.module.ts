@@ -10,6 +10,7 @@ import { GuardiansModule } from './modules/guardians/guardians.module';
 import { PayrollModule } from './modules/payroll/payroll.module';
 import { StaffModule } from './modules/staff/staff.module';
 import { StudentsModule } from './modules/students/students.module';
+import { WalletModule } from './modules/wallet/wallet.module';
 
 @Controller('health')
 class HealthController {
@@ -32,6 +33,7 @@ class HealthController {
     StaffModule,
     StudentsModule,
     FinanceModule,
+    WalletModule,
   ],
   controllers: [HealthController],
 })
