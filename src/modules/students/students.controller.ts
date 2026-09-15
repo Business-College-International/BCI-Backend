@@ -2,6 +2,9 @@ import { Controller, Get, Param, Req, UseGuards } from '@nestjs/common';
 import { RoleName } from '@prisma/client';
 import { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { PermissionsGuard } from '../auth/permissions.guard';
+import { RequirePermissions } from '../auth/permissions.decorator';
+import { PERMISSIONS } from '../auth/permission-catalog';
 import { StudentsService } from './students.service';
 
 type AuthenticatedRequest = Request & {
@@ -9,7 +12,8 @@ type AuthenticatedRequest = Request & {
 };
 
 @Controller('students')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
+@RequirePermissions(PERMISSIONS.STUDENTS_READ)
 export class StudentsController {
   constructor(private readonly students: StudentsService) {}
 
