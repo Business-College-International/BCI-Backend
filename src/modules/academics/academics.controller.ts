@@ -13,6 +13,7 @@ type AuthenticatedRequest = Request & { user: { id: string; roles: RoleName[] } 
 export class AcademicsController {
   constructor(private readonly academics: AcademicsService) {}
 
+  @UseGuards(JwtAuthGuard)
   @Get('academic-years')
   listAcademicYears() { return this.academics.listAcademicYears(); }
 
@@ -30,6 +31,7 @@ export class AcademicsController {
     return this.academics.createTerm(id, dto, request.user.id);
   }
 
+  @UseGuards(JwtAuthGuard)
   @Get('school-classes')
   listClasses(@Req() request: Request) {
     const academicYearId = typeof request.query.academicYearId === 'string' ? request.query.academicYearId : undefined;
