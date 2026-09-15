@@ -38,14 +38,28 @@ export class AuthService {
     const passwordHash = await bcrypt.hash(dto.password, 12);
 
     const user = await this.prisma.$transaction(async (tx) => {
-      const person = await tx.person.create({
-        data: {
-          firstName: dto.firstName.trim(),
-          lastName: dto.lastName.trim(),
-          phone,
-          email,
-        },
+      const existingPerson = await tx.person.findFirst({
+        where: { phone },
+        select: { id: true, firstName: true, lastName: true },
       });
+
+      const person = existingPerson
+        ? await tx.person.update({
+            where: { id: existingPerson.id },
+            data: {
+              firstName: dto.firstName.trim(),
+              lastName: dto.lastName.trim(),
+              email,
+            },
+          })
+        : await tx.person.create({
+            data: {
+              firstName: dto.firstName.trim(),
+              lastName: dto.lastName.trim(),
+              phone,
+              email,
+            },
+          });
 
       const created = await tx.user.create({
         data: {
@@ -54,7 +68,9 @@ export class AuthService {
           email,
           passwordHash,
           roles: { create: { role: RoleName.GUARDIAN } },
-          guardian: { create: { personId: person.id } },
+          guardian: {
+            create: { personId: person.id },
+          },
         },
         include: { roles: true },
       });
