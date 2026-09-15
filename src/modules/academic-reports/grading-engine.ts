@@ -63,12 +63,10 @@ export function resolveGrade(percentage: number, bands: readonly GradeBand[]): G
 
   const ordered = [...bands].sort((a, b) => a.lowerInclusive - b.lowerInclusive || a.order - b.order);
   const matching = ordered.find((band, index) => {
-    const lowerMatch = percentage + EPSILON >= band.lowerInclusive;
-    const upperMatch = band.upperExclusive === null
-      ? true
-      : percentage + EPSILON < band.upperExclusive;
+    const lowerMatch = percentage >= band.lowerInclusive;
+    const upperMatch = band.upperExclusive === null || percentage < band.upperExclusive;
     const isLast = index === ordered.length - 1;
-    return lowerMatch && (upperMatch || (isLast && Math.abs(percentage - 100) <= EPSILON));
+    return lowerMatch && (upperMatch || (isLast && percentage === 100));
   });
 
   if (!matching) {
