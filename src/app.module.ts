@@ -7,6 +7,7 @@ import { AssessmentsModule } from './modules/assessments/assessments.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { FinanceModule } from './modules/finance/finance.module';
 import { GuardiansModule } from './modules/guardians/guardians.module';
+import { StaffModule } from './modules/staff/staff.module';
 import { StudentsModule } from './modules/students/students.module';
 
 @Controller('health')
@@ -26,6 +27,7 @@ class HealthController {
     AttendanceModule,
     AssessmentsModule,
     GuardiansModule,
+    StaffModule,
     StudentsModule,
     FinanceModule,
   ],
