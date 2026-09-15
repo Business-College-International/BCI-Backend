@@ -32,10 +32,7 @@ export class AcademicReportsService {
     }
 
     const results = await this.prisma.assessmentResult.findMany({
-      where: {
-        studentId,
-        assessment: { termId },
-      },
+      where: { studentId, assessment: { termId } },
       include: {
         assessment: {
           select: {
@@ -82,11 +79,18 @@ export class AcademicReportsService {
     const weightedContributionTotal = weightedRows.reduce((sum, row) => sum + (row.weightedContribution ?? 0), 0);
     const unweightedPercentageTotal = unweightedRows.reduce((sum, row) => sum + row.percentage, 0);
 
-    const overall = weightTotal > 0
-      ? Number(weightedContributionTotal.toFixed(2))
-      : rows.length > 0
-        ? Number(((unweightedPercentageTotal / rows.length)).toFixed(2))
-        : null;
+    let overallPercentage: number | null = null;
+    let mode: 'WEIGHTED' | 'UNWEIGHTED_AVERAGE' | 'MIXED_POLICY_REQUIRED' | 'NO_RESULTS' = 'NO_RESULTS';
+
+    if (weightedRows.length > 0 && unweightedRows.length === 0) {
+      overallPercentage = Number(weightedContributionTotal.toFixed(2));
+      mode = 'WEIGHTED';
+    } else if (weightedRows.length === 0 && unweightedRows.length > 0) {
+      overallPercentage = Number((unweightedPercentageTotal / unweightedRows.length).toFixed(2));
+      mode = 'UNWEIGHTED_AVERAGE';
+    } else if (weightedRows.length > 0 && unweightedRows.length > 0) {
+      mode = 'MIXED_POLICY_REQUIRED';
+    }
 
     const subjectMap = new Map<string, { code: string; name: string; percentages: number[] }>();
     for (const row of rows) {
@@ -107,8 +111,8 @@ export class AcademicReportsService {
       student,
       term,
       calculation: {
-        overallPercentage: overall,
-        mode: weightTotal > 0 ? 'WEIGHTED' : rows.length > 0 ? 'UNWEIGHTED_AVERAGE' : 'NO_RESULTS',
+        overallPercentage,
+        mode,
         weightedAssessmentCount: weightedRows.length,
         unweightedAssessmentCount: unweightedRows.length,
         totalConfiguredWeight: weightTotal || null,
@@ -123,14 +127,9 @@ export class AcademicReportsService {
   }
 
   private async resolveScope(studentId: string, termId: string, actorUserId: string, roles: RoleName[]) {
-    if (roles.some((role) => PRIVILEGED_ROLES.has(role))) {
-      return { allowed: true, guardianRestricted: false };
-    }
+    if (roles.some((role) => PRIVILEGED_ROLES.has(role))) return { allowed: true, guardianRestricted: false };
 
-    const guardian = await this.prisma.guardian.findUnique({
-      where: { userId: actorUserId },
-      select: { personId: true },
-    });
+    const guardian = await this.prisma.guardian.findUnique({ where: { userId: actorUserId }, select: { personId: true } });
     if (guardian) {
       const link = await this.prisma.guardianStudent.findUnique({
         where: { guardianId_studentId: { guardianId: guardian.personId, studentId } },
