@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { AdmissionDecision, ApplicationStatus, RoleName } from '@prisma/client';
+import { AdmissionDecision, ApplicationStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
 import { AdmitApplicationDto } from './dto/admit-application.dto';
 import { CreateApplicationDto } from './dto/create-application.dto';
@@ -26,27 +26,15 @@ export class ApplicationsService {
         previousSchool: dto.previousSchool?.trim(),
         passportPhotoUrl: dto.passportPhotoUrl?.trim(),
       },
-      select: {
-        id: true,
-        trackingCode: true,
-        status: true,
-        submittedAt: true,
-      },
+      select: { id: true, trackingCode: true, status: true, submittedAt: true },
     });
   }
 
   async findByTrackingCode(trackingCode: string) {
     const application = await this.prisma.application.findUnique({
       where: { trackingCode },
-      select: {
-        trackingCode: true,
-        levelApplied: true,
-        programmeApplied: true,
-        status: true,
-        submittedAt: true,
-      },
+      select: { trackingCode: true, levelApplied: true, programmeApplied: true, status: true, submittedAt: true },
     });
-
     if (!application) throw new NotFoundException('Application not found');
     return application;
   }
@@ -71,7 +59,12 @@ export class ApplicationsService {
     });
   }
 
-  async review(id: string, status: ApplicationStatus.UNDER_REVIEW | ApplicationStatus.REJECTED, reason: string | undefined, actorUserId: string) {
+  async review(
+    id: string,
+    status: ApplicationStatus.UNDER_REVIEW | ApplicationStatus.REJECTED,
+    reason: string | undefined,
+    actorUserId: string,
+  ) {
     const current = await this.prisma.application.findUnique({ where: { id } });
     if (!current) throw new NotFoundException('Application not found');
     if (![ApplicationStatus.PENDING, ApplicationStatus.UNDER_REVIEW].includes(current.status)) {
@@ -85,14 +78,11 @@ export class ApplicationsService {
         select: { id: true, trackingCode: true, status: true, updatedAt: true },
       });
 
-      await tx.admissionDecisionRecord.create({
-        data: {
-          applicationId: id,
-          decision: status === ApplicationStatus.REJECTED ? AdmissionDecision.REJECTED : AdmissionDecision.ADMITTED,
-          decidedBy: actorUserId,
-          reason,
-        },
-      });
+      if (status === ApplicationStatus.REJECTED) {
+        await tx.admissionDecisionRecord.create({
+          data: { applicationId: id, decision: AdmissionDecision.REJECTED, decidedBy: actorUserId, reason },
+        });
+      }
 
       await tx.auditLog.create({
         data: {
@@ -117,9 +107,11 @@ export class ApplicationsService {
     }
 
     return this.prisma.$transaction(async (tx) => {
-      const academicYear = await tx.academicYear.findUnique({ where: { id: dto.academicYearId } });
-      const term = await tx.term.findUnique({ where: { id: dto.termId } });
-      const schoolClass = await tx.schoolClass.findUnique({ where: { id: dto.classId } });
+      const [academicYear, term, schoolClass] = await Promise.all([
+        tx.academicYear.findUnique({ where: { id: dto.academicYearId } }),
+        tx.term.findUnique({ where: { id: dto.termId } }),
+        tx.schoolClass.findUnique({ where: { id: dto.classId } }),
+      ]);
 
       if (!academicYear || !term || !schoolClass) {
         throw new NotFoundException('Academic year, term, or class was not found.');
@@ -182,12 +174,7 @@ export class ApplicationsService {
       }
 
       await tx.guardianStudent.create({
-        data: {
-          guardianId: guardianPersonId,
-          studentId: student.id,
-          relationship: 'guardian',
-          isPrimaryContact: true,
-        },
+        data: { guardianId: guardianPersonId, studentId: student.id, relationship: 'guardian', isPrimaryContact: true },
       });
 
       const enrolment = await tx.enrolment.create({
@@ -203,11 +190,7 @@ export class ApplicationsService {
       });
 
       await tx.admissionDecisionRecord.create({
-        data: {
-          applicationId: id,
-          decision: AdmissionDecision.ADMITTED,
-          decidedBy: actorUserId,
-        },
+        data: { applicationId: id, decision: AdmissionDecision.ADMITTED, decidedBy: actorUserId },
       });
 
       await tx.auditLog.create({
