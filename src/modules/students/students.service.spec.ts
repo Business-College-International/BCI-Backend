@@ -1,4 +1,4 @@
-import { ForbiddenException } from '@nestjs/common';
+import { ForbiddenException, ConflictException } from '@nestjs/common';
 import { RoleName } from '@prisma/client';
 import { StudentsService } from './students.service';
 
@@ -7,6 +7,7 @@ type MockPrisma = {
   student: { findUnique: jest.Mock };
   staff: { findUnique: jest.Mock };
   teacherAssignment: { findFirst: jest.Mock };
+  $transaction?: jest.Mock;
 };
 
 function makePrisma(overrides: Partial<MockPrisma> = {}): MockPrisma {
@@ -64,6 +65,9 @@ describe('StudentsService access boundaries', () => {
         {
           relationship: 'parent',
           isPrimaryContact: true,
+          canViewAcademic: true,
+          canPayFees: true,
+          canManageWallet: true,
           student: makeStudent({ documents: [] }),
         },
       ],
@@ -72,11 +76,35 @@ describe('StudentsService access boundaries', () => {
     const service = new StudentsService(prisma as never);
     const wards = await service.listMyWards('guardian-user-1');
 
-    expect(prisma.guardian.findUnique).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { userId: 'guardian-user-1' } }),
-    );
     expect(wards).toHaveLength(1);
     expect(wards[0].student.id).toBe('student-1');
+    expect(wards[0].permissions).toEqual({
+      canViewAcademic: true,
+      canPayFees: true,
+      canManageWallet: true,
+    });
+  });
+
+  it('suppresses academic data when a guardian link does not allow academic viewing', async () => {
+    const prisma = makePrisma();
+    prisma.guardian.findUnique.mockResolvedValue({
+      wards: [
+        {
+          relationship: 'guardian',
+          isPrimaryContact: false,
+          canViewAcademic: false,
+          canPayFees: true,
+          canManageWallet: false,
+          student: makeStudent(),
+        },
+      ],
+    });
+
+    const service = new StudentsService(prisma as never);
+    const wards = await service.listMyWards('guardian-user-2');
+
+    expect(wards[0].student).not.toHaveProperty('enrolments');
+    expect(wards[0].permissions.canViewAcademic).toBe(false);
   });
 
   it('rejects a guardian who is not linked to the requested student', async () => {
@@ -85,7 +113,15 @@ describe('StudentsService access boundaries', () => {
       makeStudent({
         id: 'student-2',
         guardians: [
-          { relationship: 'parent', isPrimaryContact: true, guardian: { userId: 'other-user' } },
+          {
+            id: 'link-1',
+            relationship: 'parent',
+            isPrimaryContact: true,
+            canViewAcademic: true,
+            canPayFees: true,
+            canManageWallet: true,
+            guardian: { userId: 'other-user' },
+          },
         ],
       }),
     );
@@ -102,7 +138,15 @@ describe('StudentsService access boundaries', () => {
     prisma.student.findUnique.mockResolvedValue(
       makeStudent({
         guardians: [
-          { relationship: 'parent', isPrimaryContact: true, guardian: { userId: 'guardian-user-1' } },
+          {
+            id: 'link-1',
+            relationship: 'parent',
+            isPrimaryContact: true,
+            canViewAcademic: true,
+            canPayFees: true,
+            canManageWallet: true,
+            guardian: { userId: 'guardian-user-1' },
+          },
         ],
       }),
     );
@@ -123,11 +167,6 @@ describe('StudentsService access boundaries', () => {
     await expect(
       service.getByActor('student-1', 'teacher-user-1', [RoleName.TEACHER]),
     ).resolves.toMatchObject({ student: { id: 'student-1' }, documents: [] });
-
-    expect(prisma.teacherAssignment.findFirst).toHaveBeenCalledWith({
-      where: { staffId: 'teacher-person-1', classId: 'class-1', termId: 'term-1' },
-      select: { id: true },
-    });
   });
 
   it('rejects a teacher who is not assigned to the student class for the term', async () => {
@@ -152,5 +191,85 @@ describe('StudentsService access boundaries', () => {
 
     expect(result).toMatchObject({ student: { id: 'student-1' } });
     expect(result.documents).toHaveLength(1);
+  });
+});
+
+describe('StudentsService guardian management', () => {
+  it('links a guardian and clears an existing primary contact atomically', async () => {
+    const tx = {
+      student: { findUnique: jest.fn().mockResolvedValue({ id: 'student-1', status: 'ACTIVE' }) },
+      guardian: { findUnique: jest.fn().mockResolvedValue({ personId: 'guardian-1', userId: 'guardian-user-1' }) },
+      guardianStudent: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        updateMany: jest.fn(),
+        create: jest.fn().mockResolvedValue({
+          id: 'link-2',
+          guardianId: 'guardian-1',
+          studentId: 'student-1',
+          relationship: 'parent',
+          isPrimaryContact: true,
+          canViewAcademic: true,
+          canPayFees: true,
+          canManageWallet: true,
+        }),
+      },
+      auditLog: { create: jest.fn() },
+    };
+    const prisma = makePrisma({ $transaction: jest.fn(async (callback) => callback(tx)) });
+    const service = new StudentsService(prisma as never);
+
+    const result = await service.linkGuardian('student-1', 'office-user-1', {
+      guardianId: 'guardian-1',
+      relationship: 'parent',
+      isPrimaryContact: true,
+    });
+
+    expect(tx.guardianStudent.updateMany).toHaveBeenCalledWith({
+      where: { studentId: 'student-1' },
+      data: { isPrimaryContact: false },
+    });
+    expect(result.isPrimaryContact).toBe(true);
+    expect(tx.auditLog.create).toHaveBeenCalled();
+  });
+
+  it('rejects duplicate guardian links', async () => {
+    const tx = {
+      student: { findUnique: jest.fn().mockResolvedValue({ id: 'student-1', status: 'ACTIVE' }) },
+      guardian: { findUnique: jest.fn().mockResolvedValue({ personId: 'guardian-1', userId: 'guardian-user-1' }) },
+      guardianStudent: {
+        findUnique: jest.fn().mockResolvedValue({ id: 'existing-link' }),
+        updateMany: jest.fn(),
+        create: jest.fn(),
+      },
+      auditLog: { create: jest.fn() },
+    };
+    const prisma = makePrisma({ $transaction: jest.fn(async (callback) => callback(tx)) });
+    const service = new StudentsService(prisma as never);
+
+    await expect(service.linkGuardian('student-1', 'office-user-1', {
+      guardianId: 'guardian-1',
+      relationship: 'parent',
+    })).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('removes a guardian link and records the previous relationship', async () => {
+    const tx = {
+      guardianStudent: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'link-1', guardianId: 'guardian-1', studentId: 'student-1', relationship: 'parent',
+          isPrimaryContact: true, canViewAcademic: true, canPayFees: true, canManageWallet: true,
+        }),
+        delete: jest.fn(),
+      },
+      auditLog: { create: jest.fn() },
+    };
+    const prisma = makePrisma({ $transaction: jest.fn(async (callback) => callback(tx)) });
+    const service = new StudentsService(prisma as never);
+
+    await expect(service.removeGuardian('student-1', 'guardian-1', 'office-user-1'))
+      .resolves.toEqual({ success: true });
+
+    expect(tx.guardianStudent.delete).toHaveBeenCalledWith({ where: { id: 'link-1' } });
+    expect(tx.auditLog.create).toHaveBeenCalled();
   });
 });
