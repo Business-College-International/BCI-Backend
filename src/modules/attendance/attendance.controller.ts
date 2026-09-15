@@ -7,6 +7,7 @@ import { RequirePermissions } from '../auth/permissions.decorator';
 import { PERMISSIONS } from '../auth/permission-catalog';
 import { AttendanceService } from './attendance.service';
 import { CreateAttendanceSessionDto } from './dto/create-attendance-session.dto';
+import { ListStudentAttendanceDto } from './dto/list-student-attendance.dto';
 import { MarkAttendanceDto } from './dto/mark-attendance.dto';
 
 type AuthenticatedRequest = Request & { user: { id: string; roles: RoleName[] } };
@@ -39,9 +40,9 @@ export class AttendanceController {
   @RequirePermissions(PERMISSIONS.ATTENDANCE_READ)
   getStudentAttendance(
     @Param('studentId') studentId: string,
-    @Query('termId') termId: string | undefined,
+    @Query() query: ListStudentAttendanceDto,
     @Req() request: AuthenticatedRequest,
   ) {
-    return this.attendance.getStudentAttendance(studentId, request.user.id, request.user.roles, termId);
+    return this.attendance.getStudentAttendance(studentId, request.user.id, request.user.roles, query.termId);
   }
 }
