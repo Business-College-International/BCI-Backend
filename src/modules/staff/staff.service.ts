@@ -14,7 +14,8 @@ import { CreateTeacherAssignmentDto } from './dto/create-teacher-assignment.dto'
 export class StaffService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async listDirectory() {
+  async listDirectory(actorUserId: string, roles: RoleName[]) {
+    await this.assertStaffReadAccess(actorUserId, roles);
     return this.prisma.staff.findMany({
       orderBy: { staffIdNo: 'asc' },
       include: {
