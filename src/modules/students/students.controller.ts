@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { RoleName } from '@prisma/client';
 import { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -7,6 +7,7 @@ import { RequirePermissions } from '../auth/permissions.decorator';
 import { PERMISSIONS } from '../auth/permission-catalog';
 import { StudentsService } from './students.service';
 import { LinkGuardianDto } from './dto/link-guardian.dto';
+import { ListStudentsDto } from './dto/list-students.dto';
 import { WithdrawStudentDto } from './dto/withdraw-student.dto';
 
 type AuthenticatedRequest = Request & {
@@ -18,6 +19,14 @@ type AuthenticatedRequest = Request & {
 @RequirePermissions(PERMISSIONS.STUDENTS_READ)
 export class StudentsController {
   constructor(private readonly students: StudentsService) {}
+
+  @Get('directory')
+  listDirectory(
+    @Query() query: ListStudentsDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.students.listDirectory(request.user.id, request.user.roles, query);
+  }
 
   @Get('me/wards')
   listMyWards(@Req() request: AuthenticatedRequest) {
