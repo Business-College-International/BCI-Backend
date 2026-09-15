@@ -33,10 +33,38 @@ export class ApplicationsService {
   async findByTrackingCode(trackingCode: string) {
     const application = await this.prisma.application.findUnique({
       where: { trackingCode },
-      select: { trackingCode: true, levelApplied: true, programmeApplied: true, status: true, submittedAt: true },
+      select: {
+        trackingCode: true,
+        levelApplied: true,
+        programmeApplied: true,
+        status: true,
+        submittedAt: true,
+        updatedAt: true,
+        admissionDecisions: {
+          orderBy: { decidedAt: 'asc' },
+          select: { decision: true, decidedAt: true },
+        },
+      },
     });
     if (!application) throw new NotFoundException('Application not found');
-    return application;
+
+    const events = [
+      { code: 'SUBMITTED', at: application.submittedAt },
+      ...application.admissionDecisions.map((decision) => ({
+        code: decision.decision === AdmissionDecision.ADMITTED ? 'ADMITTED' : 'REJECTED',
+        at: decision.decidedAt,
+      })),
+    ].sort((a, b) => a.at.getTime() - b.at.getTime());
+
+    return {
+      trackingCode: application.trackingCode,
+      levelApplied: application.levelApplied,
+      programmeApplied: application.programmeApplied,
+      status: application.status,
+      submittedAt: application.submittedAt,
+      updatedAt: application.updatedAt,
+      timeline: events,
+    };
   }
 
   async listForStaff() {
