@@ -31,12 +31,28 @@ export class PermissionsGuard implements CanActivate {
     const userId = request.user?.id;
     if (!userId) throw new ForbiddenException('Authenticated user context is required.');
 
-    const assignments = await this.prisma.userPermission.findMany({
-      where: { userId, permissionCode: { in: required } },
+    const [userRoles, directPermissions] = await Promise.all([
+      this.prisma.userRole.findMany({
+        where: { userId },
+        select: { role: true },
+      }),
+      this.prisma.userPermission.findMany({
+        where: { userId, permissionCode: { in: required } },
+        select: { permissionCode: true },
+      }),
+    ]);
+
+    const roleNames = userRoles.map(({ role }) => role);
+    const rolePermissions = await this.prisma.rolePermission.findMany({
+      where: { role: { in: roleNames }, permissionCode: { in: required } },
       select: { permissionCode: true },
     });
 
-    const granted = new Set(assignments.map((assignment) => assignment.permissionCode));
+    const granted = new Set([
+      ...directPermissions.map(({ permissionCode }) => permissionCode),
+      ...rolePermissions.map(({ permissionCode }) => permissionCode),
+    ]);
+
     if (required.every((permission) => granted.has(permission))) return true;
 
     throw new ForbiddenException('You do not have permission to perform this action.');
