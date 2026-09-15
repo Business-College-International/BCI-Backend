@@ -1,0 +1,344 @@
+// BCI School Management System — starter schema
+// Run `npx prisma migrate dev` after setting DATABASE_URL in .env
+// This covers the core entities from docs/MASTER_PLAN.md section 5.
+// Extend per-module as each phase is built (see roadmap).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RoleName {
+  DIRECTOR
+  PRINCIPAL
+  OFFICE
+  ACCOUNTANT
+  TEACHER
+  SUPPORT_STAFF
+  GUARDIAN
+  APPLICANT
+}
+
+enum Level {
+  KG1
+  KG2
+  P1
+  P2
+  P3
+  P4
+  P5
+  P6
+  JHS1
+  JHS2
+  JHS3
+  SHS1
+  SHS2
+  SHS3
+}
+
+enum Programme {
+  NONE // KG/Primary/JHS
+  AGRIC
+  GENERAL_ARTS
+  BUSINESS
+  HOME_ECONOMICS
+}
+
+enum StudentStatus {
+  ACTIVE
+  GRADUATED
+  WITHDRAWN
+  TRANSFERRED
+}
+
+enum ApplicationStatus {
+  PENDING
+  UNDER_REVIEW
+  ADMITTED
+  REJECTED
+}
+
+model User {
+  id           String    @id @default(uuid())
+  email        String?   @unique
+  phone        String    @unique
+  passwordHash String
+  status       String    @default("active")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  roles        UserRole[]
+  guardian     Guardian?
+  staff        Staff?
+}
+
+model UserRole {
+  id     String   @id @default(uuid())
+  userId String
+  role   RoleName
+  user   User     @relation(fields: [userId], references: [id])
+
+  @@unique([userId, role])
+}
+
+model Guardian {
+  userId     String   @id
+  occupation String?
+  address    String?
+  user       User     @relation(fields: [userId], references: [id])
+
+  wards      GuardianStudent[]
+}
+
+model GuardianStudent {
+  id               String   @id @default(uuid())
+  guardianId       String
+  studentId        String
+  relationship     String
+  isPrimaryContact Boolean  @default(false)
+
+  guardian Guardian @relation(fields: [guardianId], references: [userId])
+  student  Student  @relation(fields: [studentId], references: [id])
+
+  @@unique([guardianId, studentId])
+}
+
+model Staff {
+  userId         String   @id
+  staffIdNo      String   @unique
+  department     String?
+  employmentDate DateTime?
+  contractType   String?
+
+  user           User     @relation(fields: [userId], references: [id])
+  duties         StaffDuty[]
+  teaching       TeacherAssignment[]
+  salary         SalaryStructure?
+  payrollRuns    PayrollRun[]
+}
+
+model StaffDuty {
+  id          String   @id @default(uuid())
+  staffId     String
+  description String
+  assignedBy  String?
+  active      Boolean  @default(true)
+
+  staff Staff @relation(fields: [staffId], references: [userId])
+}
+
+model Class {
+  id            String    @id @default(uuid())
+  name          String
+  level         Level
+  programme     Programme @default(NONE)
+  division      String?   // A, B, C
+  academicYear  String
+
+  students      Student[]
+  assignments   TeacherAssignment[]
+}
+
+model Subject {
+  id          String   @id @default(uuid())
+  name        String
+  level       Level
+  isElective  Boolean  @default(false)
+
+  assignments TeacherAssignment[]
+  electives   StudentElective[]
+}
+
+model TeacherAssignment {
+  id        String  @id @default(uuid())
+  staffId   String
+  classId   String
+  subjectId String
+  termId    String
+
+  staff   Staff   @relation(fields: [staffId], references: [userId])
+  class   Class   @relation(fields: [classId], references: [id])
+  subject Subject @relation(fields: [subjectId], references: [id])
+}
+
+model SalaryStructure {
+  staffId    String @id
+  basePay    Decimal
+  allowances Json?
+  deductions Json?
+
+  staff Staff @relation(fields: [staffId], references: [userId])
+}
+
+model PayrollRun {
+  id           String   @id @default(uuid())
+  staffId      String
+  period       String   // e.g. "2026-09"
+  gross        Decimal
+  net          Decimal
+  status       String   @default("pending")
+  moolreTxnRef String?
+  paidAt       DateTime?
+
+  staff Staff @relation(fields: [staffId], references: [userId])
+}
+
+model Student {
+  id              String        @id @default(uuid())
+  firstName       String
+  lastName        String
+  dob             DateTime
+  hometown        String?
+  region          String?
+  passportPhotoUrl String?
+  previousSchool  String?
+  level           Level
+  programme       Programme     @default(NONE)
+  classId         String?
+  status          StudentStatus @default(ACTIVE)
+  admittedAt      DateTime?
+
+  class      Class?  @relation(fields: [classId], references: [id])
+  guardians  GuardianStudent[]
+  documents  StudentDocument[]
+  electives  StudentElective[]
+  attendance Attendance[]
+  bills      StudentBill[]
+  wallet     Wallet?
+}
+
+model StudentDocument {
+  id        String  @id @default(uuid())
+  studentId String
+  type      String
+  fileUrl   String
+
+  student Student @relation(fields: [studentId], references: [id])
+}
+
+model StudentElective {
+  id        String  @id @default(uuid())
+  studentId String
+  subjectId String
+
+  student Student @relation(fields: [studentId], references: [id])
+  subject Subject @relation(fields: [subjectId], references: [id])
+
+  @@unique([studentId, subjectId])
+}
+
+model Attendance {
+  id        String   @id @default(uuid())
+  studentId String
+  classId   String
+  date      DateTime
+  status    String   // present | absent | late
+  markedBy  String
+
+  student Student @relation(fields: [studentId], references: [id])
+
+  @@unique([studentId, date])
+}
+
+model Application {
+  id               String             @id @default(uuid())
+  firstName        String
+  lastName         String
+  dob              DateTime
+  levelApplied     Level
+  programmeApplied Programme          @default(NONE)
+  guardianName     String
+  guardianPhone    String
+  previousSchool   String?
+  passportPhotoUrl String?
+  status           ApplicationStatus  @default(PENDING)
+  reviewedBy       String?
+  submittedAt      DateTime           @default(now())
+}
+
+model FeeStructure {
+  id        String   @id @default(uuid())
+  level     Level
+  programme Programme @default(NONE)
+  term      String
+  itemName  String
+  amount    Decimal
+
+  bills StudentBill[]
+}
+
+model StudentBill {
+  id             String   @id @default(uuid())
+  studentId      String
+  feeStructureId String
+  term           String
+  amountDue      Decimal
+  amountPaid     Decimal  @default(0)
+  status         String   @default("unpaid")
+
+  student      Student      @relation(fields: [studentId], references: [id])
+  feeStructure FeeStructure @relation(fields: [feeStructureId], references: [id])
+}
+
+model Payment {
+  id           String   @id @default(uuid())
+  studentId    String?
+  guardianId   String?
+  amount       Decimal
+  purpose      String   // fee | wallet_topup | stationery
+  moolreTxnRef String?
+  status       String   @default("pending")
+  receiptUrl   String?
+  createdAt    DateTime @default(now())
+}
+
+model Wallet {
+  studentId String   @id
+  balance   Decimal  @default(0)
+
+  student      Student @relation(fields: [studentId], references: [id])
+  transactions WalletTransaction[]
+}
+
+model WalletTransaction {
+  id          String   @id @default(uuid())
+  walletId    String
+  type        String   // topup | withdrawal
+  amount      Decimal
+  processedBy String?
+  createdAt   DateTime @default(now())
+
+  wallet Wallet @relation(fields: [walletId], references: [studentId])
+}
+
+model StationeryItem {
+  id       String  @id @default(uuid())
+  name     String
+  price    Decimal
+  stockQty Int     @default(0)
+}
+
+model Expense {
+  id          String   @id @default(uuid())
+  category    String
+  amount      Decimal
+  description String?
+  receiptUrl  String?
+  enteredBy   String
+  approvedBy  String?
+  createdAt   DateTime @default(now())
+}
+
+model Announcement {
+  id            String   @id @default(uuid())
+  title         String
+  body          String
+  audienceScope String   // all | level:SHS3 | class:<id> etc.
+  sentBy        String
+  smsSent       Boolean  @default(false)
+  createdAt     DateTime @default(now())
+}

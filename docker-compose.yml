@@ -1,0 +1,16 @@
+version: "3.9"
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: bci_admin
+      POSTGRES_PASSWORD: change_me_in_env
+      POSTGRES_DB: bci_school
+    ports:
+      - "5432:5432"
+    volumes:
+      - bci_pg_data:/var/lib/postgresql/data
+
+volumes:
+  bci_pg_data:
