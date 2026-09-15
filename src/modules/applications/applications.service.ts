@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { AdmissionDecision, ApplicationStatus } from '@prisma/client';
+import { AdmissionDecision, ApplicationStatus, RoleName } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
 import { AdmitApplicationDto } from './dto/admit-application.dto';
 import { CreateApplicationDto } from './dto/create-application.dto';
@@ -151,31 +151,58 @@ export class ApplicationsService {
       });
 
       const guardianPhone = current.guardianPhone.trim();
-      const guardianUser = await tx.user.findUnique({ where: { phone: guardianPhone } });
-      let guardianPersonId: string;
+      const existingUser = await tx.user.findUnique({
+        where: { phone: guardianPhone },
+        include: { roles: true },
+      });
 
-      if (guardianUser?.personId) {
-        guardianPersonId = guardianUser.personId;
+      let guardianPersonId: string;
+      if (existingUser) {
+        const isGuardian = existingUser.roles.some((assignment) => assignment.role === RoleName.GUARDIAN);
+        if (!isGuardian || !existingUser.personId) {
+          throw new ConflictException('The guardian phone number belongs to a non-guardian account. Resolve the identity before admission.');
+        }
+        guardianPersonId = existingUser.personId;
+
         await tx.guardian.upsert({
           where: { personId: guardianPersonId },
-          create: { personId: guardianPersonId, userId: guardianUser.id },
-          update: { userId: guardianUser.id },
+          create: { personId: guardianPersonId, userId: existingUser.id },
+          update: { userId: existingUser.id },
         });
       } else {
-        const guardianPerson = await tx.person.create({
-          data: {
-            firstName: current.guardianName.split(' ')[0] || current.guardianName,
-            lastName: current.guardianName.split(' ').slice(1).join(' ') || 'Guardian',
-            phone: guardianPhone,
-          },
+        const existingPerson = await tx.person.findFirst({
+          where: { phone: guardianPhone },
+          select: { id: true },
         });
-        guardianPersonId = guardianPerson.id;
-        await tx.guardian.create({ data: { personId: guardianPersonId } });
+
+        if (existingPerson) {
+          guardianPersonId = existingPerson.id;
+          await tx.guardian.upsert({
+            where: { personId: guardianPersonId },
+            create: { personId: guardianPersonId },
+            update: {},
+          });
+        } else {
+          const guardianPerson = await tx.person.create({
+            data: {
+              firstName: current.guardianName.split(' ')[0] || current.guardianName,
+              lastName: current.guardianName.split(' ').slice(1).join(' ') || 'Guardian',
+              phone: guardianPhone,
+            },
+          });
+          guardianPersonId = guardianPerson.id;
+          await tx.guardian.create({ data: { personId: guardianPersonId } });
+        }
       }
 
-      await tx.guardianStudent.create({
-        data: { guardianId: guardianPersonId, studentId: student.id, relationship: 'guardian', isPrimaryContact: true },
+      const existingLink = await tx.guardianStudent.findUnique({
+        where: { guardianId_studentId: { guardianId: guardianPersonId, studentId: student.id } },
       });
+      if (!existingLink) {
+        await tx.guardianStudent.create({
+          data: { guardianId: guardianPersonId, studentId: student.id, relationship: 'guardian', isPrimaryContact: true },
+        });
+      }
 
       const enrolment = await tx.enrolment.create({
         data: {
