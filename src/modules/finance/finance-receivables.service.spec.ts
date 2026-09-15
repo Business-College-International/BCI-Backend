@@ -38,7 +38,7 @@ describe('FinanceReceivablesService', () => {
         student: { id: 'student-1', admissionNumber: 'BCI-001', firstName: 'Ama', lastName: 'Doe' },
       },
       {
-        id: 'invoice-2', invoiceNumber: 'BCI-2', dueAt: new Date('2026-06-01T00:00:00.000Z'),
+        id: 'invoice-2', invoiceNumber: 'BCI-2', dueAt: new Date('2026-07-01T00:00:00.000Z'),
         lines: [{ amountDue: '1000.00' }], allocations: [],
         student: { id: 'student-2', admissionNumber: 'BCI-002', firstName: 'Kojo', lastName: 'Doe' },
       },
