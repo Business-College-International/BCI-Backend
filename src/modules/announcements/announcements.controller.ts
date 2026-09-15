@@ -16,7 +16,6 @@ export class AnnouncementsController {
   constructor(private readonly announcements: AnnouncementsService) {}
 
   @Get()
-  @RequirePermissions(PERMISSIONS.ANNOUNCEMENTS_READ)
   list(@Req() request: AuthenticatedRequest) {
     return this.announcements.listForUser(request.user.id, request.user.roles);
   }
