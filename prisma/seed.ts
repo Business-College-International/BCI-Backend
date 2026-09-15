@@ -51,6 +51,7 @@ const permissionsByRole: Record<RoleName, readonly string[]> = {
   ],
   [RoleName.GUARDIAN]: [
     PERMISSIONS.STUDENTS_READ,
+    PERMISSIONS.ATTENDANCE_READ,
   ],
   [RoleName.APPLICANT]: [
     PERMISSIONS.APPLICATIONS_READ,
