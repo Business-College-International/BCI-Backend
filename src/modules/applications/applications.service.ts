@@ -119,6 +119,12 @@ export class ApplicationsService {
       if (term.academicYearId !== academicYear.id) {
         throw new BadRequestException('The selected term does not belong to the selected academic year.');
       }
+      if (schoolClass.academicYearId !== academicYear.id) {
+        throw new BadRequestException('The selected class does not belong to the selected academic year.');
+      }
+      if (term.startsAt < academicYear.startsAt || term.endsAt > academicYear.endsAt) {
+        throw new BadRequestException('The selected term falls outside the selected academic year.');
+      }
       if (schoolClass.level !== current.levelApplied || schoolClass.programme !== current.programmeApplied) {
         throw new BadRequestException('The selected class does not match the application level/programme.');
       }
@@ -126,8 +132,31 @@ export class ApplicationsService {
         throw new BadRequestException('The selected term is not open for enrolment.');
       }
 
+      if (schoolClass.capacity !== null) {
+        const activeEnrollmentCount = await tx.enrolment.count({
+          where: {
+            classId: schoolClass.id,
+            termId: term.id,
+            status: 'ACTIVE',
+          },
+        });
+        if (activeEnrollmentCount >= schoolClass.capacity) {
+          throw new ConflictException('The selected class is already at capacity.');
+        }
+      }
+
       const existingStudent = await tx.student.findUnique({ where: { applicationId: id } });
       if (existingStudent) throw new ConflictException('This application has already created a student.');
+
+      if (dto.admissionNumber) {
+        const existingAdmissionNumber = await tx.student.findUnique({
+          where: { admissionNumber: dto.admissionNumber.trim() },
+          select: { id: true },
+        });
+        if (existingAdmissionNumber) {
+          throw new ConflictException('The admission number is already in use.');
+        }
+      }
 
       const applicationTransition = await tx.application.updateMany({
         where: { id, status: ApplicationStatus.UNDER_REVIEW },
