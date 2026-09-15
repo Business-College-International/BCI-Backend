@@ -6,6 +6,7 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './jwt.strategy';
 import { JwtAuthGuard } from './jwt-auth.guard';
+import { PermissionsGuard } from './permissions.guard';
 import { RolesGuard } from './roles.guard';
 
 @Module({
@@ -14,7 +15,20 @@ import { RolesGuard } from './roles.guard';
     JwtModule.register({ secret: process.env.JWT_ACCESS_SECRET }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, JwtAuthGuard, RolesGuard, PrismaService],
-  exports: [AuthService, PassportModule, JwtAuthGuard, RolesGuard],
+  providers: [
+    AuthService,
+    JwtStrategy,
+    JwtAuthGuard,
+    PermissionsGuard,
+    RolesGuard,
+    PrismaService,
+  ],
+  exports: [
+    AuthService,
+    PassportModule,
+    JwtAuthGuard,
+    PermissionsGuard,
+    RolesGuard,
+  ],
 })
 export class AuthModule {}
