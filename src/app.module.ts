@@ -6,6 +6,7 @@ import { ApplicationsModule } from './modules/applications/applications.module';
 import { AttendanceModule } from './modules/attendance/attendance.module';
 import { AssessmentsModule } from './modules/assessments/assessments.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { ConfigurationModule } from './modules/configuration/configuration.module';
 import { FinanceModule } from './modules/finance/finance.module';
 import { GuardiansModule } from './modules/guardians/guardians.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
@@ -33,6 +34,7 @@ class HealthController {
     ApplicationsModule,
     AttendanceModule,
     AssessmentsModule,
+    ConfigurationModule,
     GuardiansModule,
     NotificationsModule,
     PayrollModule,
