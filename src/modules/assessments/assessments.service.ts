@@ -68,6 +68,48 @@ export class AssessmentsService {
     });
   }
 
+  async getAssessmentRoster(
+    classId: string,
+    termId: string,
+    subjectId: string,
+    actorUserId: string,
+    roles: RoleName[],
+  ) {
+    const [term, schoolClass, subject] = await Promise.all([
+      this.prisma.term.findUnique({ where: { id: termId } }),
+      this.prisma.schoolClass.findUnique({ where: { id: classId } }),
+      this.prisma.subject.findUnique({ where: { id: subjectId } }),
+    ]);
+
+    if (!term || !schoolClass || !subject) throw new NotFoundException('Term, class, or subject not found.');
+    if (schoolClass.academicYearId !== term.academicYearId) {
+      throw new BadRequestException('The class does not belong to the selected term academic year.');
+    }
+    if (subject.level !== schoolClass.level) {
+      throw new BadRequestException('The subject level does not match the class level.');
+    }
+
+    await this.assertTeacherAssignmentForClass(this.prisma, actorUserId, roles, termId, subjectId, classId);
+
+    const rows = await this.prisma.enrolment.findMany({
+      where: { classId, termId, status: 'ACTIVE' },
+      orderBy: [{ student: { lastName: 'asc' } }, { student: { firstName: 'asc' } }],
+      select: {
+        student: {
+          select: {
+            id: true,
+            admissionNumber: true,
+            firstName: true,
+            lastName: true,
+            status: true,
+          },
+        },
+      },
+    });
+
+    return rows.map(({ student }) => student);
+  }
+
   async enterResults(assessmentId: string, dto: EnterAssessmentResultsDto, actorUserId: string, roles: RoleName[]) {
     return this.prisma.$transaction(async (tx) => {
       const assessment = await tx.assessment.findUnique({
@@ -226,6 +268,27 @@ export class AssessmentsService {
       select: { id: true },
     });
     if (!assignment) throw new ForbiddenException('You are not assigned to this subject for the selected term.');
+  }
+
+  private async assertTeacherAssignmentForClass(
+    tx: PrismaService,
+    actorUserId: string,
+    roles: RoleName[],
+    termId: string,
+    subjectId: string,
+    classId: string,
+  ) {
+    if (roles.some((role) => PRIVILEGED_ASSESSMENT_ROLES.has(role))) return;
+    if (!roles.includes(RoleName.TEACHER)) throw new ForbiddenException('Assessment access is restricted.');
+
+    const staff = await tx.staff.findUnique({ where: { userId: actorUserId }, select: { personId: true } });
+    if (!staff) throw new ForbiddenException('Teacher access requires an active staff link.');
+
+    const assignment = await tx.teacherAssignment.findFirst({
+      where: { staffId: staff.personId, termId, subjectId, classId },
+      select: { id: true },
+    });
+    if (!assignment) throw new ForbiddenException('You are not assigned to this class/subject for the selected term.');
   }
 
   private async findEligibleStudents(
