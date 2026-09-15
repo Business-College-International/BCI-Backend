@@ -1,6 +1,7 @@
 import { Controller, Get, Module } from '@nestjs/common';
 import { AcademicsModule } from './modules/academics/academics.module';
 import { ApplicationsModule } from './modules/applications/applications.module';
+import { AttendanceModule } from './modules/attendance/attendance.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { FinanceModule } from './modules/finance/finance.module';
 import { GuardiansModule } from './modules/guardians/guardians.module';
@@ -15,7 +16,7 @@ class HealthController {
 }
 
 @Module({
-  imports: [AuthModule, AcademicsModule, ApplicationsModule, GuardiansModule, StudentsModule, FinanceModule],
+  imports: [AuthModule, AcademicsModule, ApplicationsModule, AttendanceModule, GuardiansModule, StudentsModule, FinanceModule],
   controllers: [HealthController],
 })
 export class AppModule {}
