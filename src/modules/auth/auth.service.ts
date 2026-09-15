@@ -19,18 +19,12 @@ const REFRESH_DAYS = 30;
 
 @Injectable()
 export class AuthService {
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly jwt: JwtService,
-  ) {}
+  constructor(private readonly prisma: PrismaService, private readonly jwt: JwtService) {}
 
   async registerGuardian(dto: RegisterDto) {
     const phone = dto.phone.trim();
     const email = dto.email?.trim().toLowerCase();
-    const [phoneMatch, emailMatch] = await Promise.all([
-      this.prisma.user.findUnique({ where: { phone } }),
-      email ? this.prisma.user.findUnique({ where: { email } }) : null,
-    ]);
+    const [phoneMatch, emailMatch] = await Promise.all([this.prisma.user.findUnique({ where: { phone } }), email ? this.prisma.user.findUnique({ where: { email } }) : null]);
     if (phoneMatch || emailMatch) throw new ConflictException('An account already exists for that phone or email.');
     const passwordHash = await bcrypt.hash(dto.password, 12);
     const user = await this.prisma.$transaction(async (tx) => {
@@ -59,27 +53,18 @@ export class AuthService {
       this.prisma.rolePermission.findMany({ where: { role: { in: roles } }, select: { role: true, permissionCode: true } }),
       Promise.resolve(user.directPermissions),
     ]);
-    const effectivePermissionCodes = new Set<string>([
-      ...rolePermissions.map((permission) => permission.permissionCode),
-      ...directPermissions.map((permission) => permission.permissionCode),
-    ]);
+    const effectivePermissionCodes = new Set<string>([...rolePermissions.map((permission) => permission.permissionCode), ...directPermissions.map((permission) => permission.permissionCode)]);
     return { id: user.id, status: user.status, roles, permissions: Array.from(effectivePermissionCodes).sort(), permissionAssignments: directPermissions, person: user.person, guardian: user.guardian, staff: user.staff };
   }
 
   async listMySessions(userId: string) {
-    return this.prisma.refreshSession.findMany({
-      where: { userId },
-      select: { id: true, createdAt: true, lastUsedAt: true, expiresAt: true, revokedAt: true },
-      orderBy: { createdAt: 'desc' },
-      take: 25,
-    });
+    return this.prisma.refreshSession.findMany({ where: { userId }, select: { id: true, createdAt: true, lastUsedAt: true, expiresAt: true, revokedAt: true }, orderBy: { createdAt: 'desc' }, take: 25 });
   }
 
   async changePassword(userId: string, dto: ChangePasswordDto) {
     const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { id: true, passwordHash: true, tokenVersion: true, status: true } });
     if (!user || user.status !== UserStatus.ACTIVE) throw new UnauthorizedException('Account is not active.');
-    const valid = await bcrypt.compare(dto.currentPassword, user.passwordHash);
-    if (!valid) throw new UnauthorizedException('Current password is incorrect.');
+    if (!(await bcrypt.compare(dto.currentPassword, user.passwordHash))) throw new UnauthorizedException('Current password is incorrect.');
     if (dto.currentPassword === dto.newPassword) throw new ConflictException('New password must be different from the current password.');
     const passwordHash = await bcrypt.hash(dto.newPassword, 12);
     const nextTokenVersion = user.tokenVersion + 1;
@@ -99,7 +84,16 @@ export class AuthService {
   }
 
   async revokeAllSessions(userId: string) {
-    const result = await this.prisma.refreshSession.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { id: true, tokenVersion: true, status: true } });
+    if (!user || user.status !== UserStatus.ACTIVE) throw new UnauthorizedException('Account is not active.');
+    const revokedAt = new Date();
+    const nextTokenVersion = user.tokenVersion + 1;
+    const result = await this.prisma.$transaction(async (tx) => {
+      await tx.user.update({ where: { id: user.id }, data: { tokenVersion: nextTokenVersion } });
+      const revoked = await tx.refreshSession.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt } });
+      await tx.auditLog.create({ data: { actorUserId: user.id, action: 'LOGOUT', entityType: 'UserSecurity', entityId: user.id, beforeJson: { tokenVersion: user.tokenVersion }, afterJson: { tokenVersion: nextTokenVersion, action: 'ALL_SESSIONS_REVOKED' } } });
+      return revoked;
+    });
     return { success: true, revokedCount: result.count };
   }
 
