@@ -7,7 +7,13 @@ export interface CompensationJson {
 
 function decimal(value: unknown): Prisma.Decimal {
   if (typeof value === 'number' || typeof value === 'string') return new Prisma.Decimal(value);
-  return new Prisma.Decimal(0);
+  throw new Error('Compensation amount/percentage must be numeric.');
+}
+
+function lines(value: unknown, field: string): CompensationJson[] {
+  if (value == null) return [];
+  if (!Array.isArray(value)) throw new Error(`${field} must be an array of compensation lines.`);
+  return value as CompensationJson[];
 }
 
 export function calculateCompensation(input: {
@@ -15,19 +21,21 @@ export function calculateCompensation(input: {
   allowances: unknown;
   deductions: unknown;
 }) {
-  const allowanceItems = Array.isArray(input.allowances) ? input.allowances : [];
-  const deductionItems = Array.isArray(input.deductions) ? input.deductions : [];
+  const allowanceItems = lines(input.allowances, 'Allowances');
+  const deductionItems = lines(input.deductions, 'Deductions');
 
   let allowancesTotal = new Prisma.Decimal(0);
-  for (const item of allowanceItems as CompensationJson[]) {
+  for (const item of allowanceItems) {
     if (item.percentage != null) allowancesTotal = allowancesTotal.plus(input.basePay.mul(decimal(item.percentage)).div(100));
-    else allowancesTotal = allowancesTotal.plus(decimal(item.amount));
+    else if (item.amount != null) allowancesTotal = allowancesTotal.plus(decimal(item.amount));
+    else throw new Error('Each allowance line must include amount or percentage.');
   }
 
   let deductionsTotal = new Prisma.Decimal(0);
-  for (const item of deductionItems as CompensationJson[]) {
+  for (const item of deductionItems) {
     if (item.percentage != null) deductionsTotal = deductionsTotal.plus(input.basePay.mul(decimal(item.percentage)).div(100));
-    else deductionsTotal = deductionsTotal.plus(decimal(item.amount));
+    else if (item.amount != null) deductionsTotal = deductionsTotal.plus(decimal(item.amount));
+    else throw new Error('Each deduction line must include amount or percentage.');
   }
 
   const grossPay = input.basePay.plus(allowancesTotal);
