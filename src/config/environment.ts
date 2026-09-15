@@ -2,6 +2,18 @@ import { Logger } from '@nestjs/common';
 
 const REQUIRED = ['DATABASE_URL', 'JWT_ACCESS_SECRET'] as const;
 
+export function getCorsOrigins(): string[] {
+  const configured = process.env.CORS_ORIGINS?.split(',').map((value) => value.trim()).filter(Boolean) ?? [];
+  const nodeEnv = process.env.NODE_ENV ?? 'development';
+
+  if (nodeEnv === 'production' && configured.length === 0) {
+    throw new Error('CORS_ORIGINS must contain at least one origin in production.');
+  }
+
+  if (configured.length > 0) return configured;
+  return ['http://localhost:5173', 'http://localhost:3000'];
+}
+
 export function validateEnvironment(): void {
   const missing = REQUIRED.filter((key) => !process.env[key]?.trim());
 
@@ -26,5 +38,6 @@ export function validateEnvironment(): void {
     throw new Error(`Unsupported NODE_ENV: ${nodeEnv}`);
   }
 
+  getCorsOrigins();
   Logger.log(`Environment validated (${nodeEnv}).`, 'Startup');
 }
