@@ -3,8 +3,13 @@ import { NestFactory } from '@nestjs/core';
 import { randomUUID } from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
 import { AppModule } from './app.module';
+import { validateEnvironment } from './config/environment';
+import { requestLoggingMiddleware } from './common/logging/request-logging.middleware';
+import { rateLimitMiddleware } from './common/security/rate-limit.middleware';
 
 async function bootstrap(): Promise<void> {
+  validateEnvironment();
+
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
 
   app.setGlobalPrefix('api/v1');
@@ -13,6 +18,8 @@ async function bootstrap(): Promise<void> {
     response.setHeader('X-Request-Id', randomUUID());
     next();
   });
+  app.use(rateLimitMiddleware);
+  app.use(requestLoggingMiddleware);
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
