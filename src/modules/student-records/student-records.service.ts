@@ -12,15 +12,29 @@ export class StudentRecordsService {
   async listDocuments(studentId: string, userId: string, roles: RoleName[]) {
     const student = await this.prisma.student.findUnique({
       where: { id: studentId },
-      select: { id: true, guardians: { select: { guardian: { select: { userId: true } }, canViewAcademic: true } } },
+      select: {
+        id: true,
+        guardians: { select: { guardian: { select: { userId: true } }, canViewAcademic: true } },
+        enrolments: { where: { status: 'ACTIVE' }, orderBy: { enrolledAt: 'desc' }, take: 1, select: { classId: true, termId: true } },
+      },
     });
     if (!student) throw new NotFoundException('Student not found.');
 
     const privileged = roles.some((role) => STAFF_ROLES.has(role));
     const linkedGuardian = student.guardians.find((link) => link.guardian.userId === userId && link.canViewAcademic);
-    const isTeacher = roles.includes(RoleName.TEACHER);
+    let scopedTeacher = false;
+    if (roles.includes(RoleName.TEACHER) && student.enrolments[0]) {
+      const staff = await this.prisma.staff.findUnique({ where: { userId }, select: { personId: true } });
+      if (staff) {
+        const assignment = await this.prisma.teacherAssignment.findFirst({
+          where: { staffId: staff.personId, classId: student.enrolments[0].classId, termId: student.enrolments[0].termId },
+          select: { id: true },
+        });
+        scopedTeacher = Boolean(assignment);
+      }
+    }
 
-    if (!privileged && !linkedGuardian && !isTeacher) throw new ForbiddenException('Document access is restricted.');
+    if (!privileged && !linkedGuardian && !scopedTeacher) throw new ForbiddenException('Document access is restricted.');
 
     return this.prisma.studentDocument.findMany({
       where: { studentId },
@@ -47,7 +61,7 @@ export class StudentRecordsService {
       const document = await tx.studentDocument.findUnique({ where: { id: documentId } });
       if (!document) throw new NotFoundException('Student document not found.');
       await tx.studentDocument.delete({ where: { id: documentId } });
-      await tx.auditLog.create({ data: { actorUserId, action: 'DELETE', entityType: 'StudentDocument', entityId: document.id, beforeJson: { studentId: document.studentId, type: document.type, fileUrl: document.fileUrl } } });
+      await tx.auditLog.create({ data: { actorUserId, action: 'DELETE', entityType: 'StudentDocument', entityId: document.id, beforeJson: { studentId: document.studentId, type: document.type, fileUrl: document.fileUrl } });
       return { success: true };
     });
   }
