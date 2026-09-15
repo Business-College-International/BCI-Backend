@@ -11,32 +11,12 @@ export class AnnouncementsService {
 
   async create(dto: CreateAnnouncementDto, actorUserId: string, roles: RoleName[]) {
     this.assertManager(roles);
-    if (dto.audienceType === 'USER' && !dto.audienceRef) {
-      throw new BadRequestException('A USER announcement requires audienceRef to identify the recipient user.');
-    }
-    if (dto.audienceType !== 'USER' && dto.audienceRef) {
-      throw new BadRequestException('audienceRef is only valid for USER announcements.');
-    }
+    if (dto.audienceType === 'USER' && !dto.audienceRef) throw new BadRequestException('A USER announcement requires audienceRef to identify the recipient user.');
+    if (dto.audienceType !== 'USER' && dto.audienceRef) throw new BadRequestException('audienceRef is only valid for USER announcements.');
 
     return this.prisma.$transaction(async (tx) => {
-      const announcement = await tx.announcement.create({
-        data: {
-          title: dto.title.trim(),
-          body: dto.body.trim(),
-          audienceType: dto.audienceType,
-          audienceRef: dto.audienceRef?.trim(),
-          sentBy: actorUserId,
-        },
-      });
-      await tx.auditLog.create({
-        data: {
-          actorUserId,
-          action: 'CREATE',
-          entityType: 'Announcement',
-          entityId: announcement.id,
-          afterJson: { title: announcement.title, audienceType: announcement.audienceType, audienceRef: announcement.audienceRef },
-        },
-      });
+      const announcement = await tx.announcement.create({ data: { title: dto.title.trim(), body: dto.body.trim(), audienceType: dto.audienceType, audienceRef: dto.audienceRef?.trim(), sentBy: actorUserId } });
+      await tx.auditLog.create({ data: { actorUserId, action: 'CREATE', entityType: 'Announcement', entityId: announcement.id, afterJson: { title: announcement.title, audienceType: announcement.audienceType, audienceRef: announcement.audienceRef } } });
       return announcement;
     });
   }
@@ -47,71 +27,33 @@ export class AnnouncementsService {
       const announcement = await tx.announcement.findUnique({ where: { id } });
       if (!announcement) throw new NotFoundException('Announcement not found.');
       if (announcement.publishedAt) throw new BadRequestException('Announcement is already published.');
-
       const recipientIds = await this.resolveRecipients(tx, announcement.audienceType, announcement.audienceRef);
       const publishedAt = new Date();
       await tx.announcement.update({ where: { id }, data: { publishedAt } });
-      if (recipientIds.length > 0) {
-        await tx.notificationDelivery.createMany({
-          data: recipientIds.map((recipientUserId) => ({
-            announcementId: id,
-            recipientUserId,
-            channel: 'IN_APP',
-            provider: 'internal',
-            status: 'delivered',
-            sentAt: publishedAt,
-            deliveredAt: publishedAt,
-          })),
-          skipDuplicates: true,
-        });
-      }
-
-      await tx.auditLog.create({
-        data: {
-          actorUserId,
-          action: 'UPDATE',
-          entityType: 'Announcement',
-          entityId: id,
-          afterJson: { publishedAt: publishedAt.toISOString(), recipientCount: recipientIds.length },
-        },
-      });
-
+      if (recipientIds.length > 0) await tx.notificationDelivery.createMany({ data: recipientIds.map((recipientUserId) => ({ announcementId: id, recipientUserId, channel: 'IN_APP', provider: 'internal', status: 'delivered', sentAt: publishedAt, deliveredAt: publishedAt })) });
+      await tx.auditLog.create({ data: { actorUserId, action: 'UPDATE', entityType: 'Announcement', entityId: id, afterJson: { publishedAt: publishedAt.toISOString(), recipientCount: recipientIds.length } } });
       return { ...announcement, publishedAt, recipientCount: recipientIds.length };
     });
   }
 
   async listForUser(userId: string, roles: RoleName[]) {
-    const isGuardian = roles.includes(RoleName.GUARDIAN);
-    const isTeacher = roles.includes(RoleName.TEACHER);
-    const isStaff = roles.some((role) => [RoleName.DIRECTOR, RoleName.PRINCIPAL, RoleName.OFFICE, RoleName.ACCOUNTANT, RoleName.SUPPORT_STAFF, RoleName.TEACHER].includes(role));
-
+    const isManager = roles.some((role) => MANAGE_ROLES.has(role));
     const audienceTypes = ['ALL'] as string[];
-    if (isGuardian) audienceTypes.push('GUARDIANS');
-    if (isStaff) audienceTypes.push('STAFF');
-    if (isTeacher) audienceTypes.push('TEACHERS');
+    if (roles.includes(RoleName.GUARDIAN)) audienceTypes.push('GUARDIANS');
+    if (roles.includes(RoleName.TEACHER)) audienceTypes.push('TEACHERS');
+    if (roles.some((role) => [RoleName.DIRECTOR, RoleName.PRINCIPAL, RoleName.OFFICE, RoleName.ACCOUNTANT, RoleName.SUPPORT_STAFF].includes(role))) audienceTypes.push('STAFF');
 
-    const [global, direct] = await Promise.all([
-      this.prisma.announcement.findMany({
-        where: { publishedAt: { not: null }, audienceType: { in: audienceTypes } },
-        orderBy: { publishedAt: 'desc' },
-        take: 100,
-      }),
-      this.prisma.announcement.findMany({
-        where: { publishedAt: { not: null }, audienceType: 'USER', audienceRef: userId },
-        orderBy: { publishedAt: 'desc' },
-        take: 100,
-      }),
+    const [publishedAudience, publishedDirect, ownDrafts] = await Promise.all([
+      this.prisma.announcement.findMany({ where: { publishedAt: { not: null }, audienceType: { in: audienceTypes } }, orderBy: { publishedAt: 'desc' }, take: 100 }),
+      this.prisma.announcement.findMany({ where: { publishedAt: { not: null }, audienceType: 'USER', audienceRef: userId }, orderBy: { publishedAt: 'desc' }, take: 100 }),
+      isManager ? this.prisma.announcement.findMany({ where: { sentBy: userId, publishedAt: null }, orderBy: { createdAt: 'desc' }, take: 100 }) : Promise.resolve([]),
     ]);
 
-    return [...global, ...direct]
-      .sort((a, b) => (b.publishedAt?.getTime() ?? 0) - (a.publishedAt?.getTime() ?? 0))
-      .slice(0, 100);
+    return [...publishedAudience, ...publishedDirect, ...ownDrafts].sort((a, b) => (b.publishedAt?.getTime() ?? b.createdAt.getTime()) - (a.publishedAt?.getTime() ?? a.createdAt.getTime())).slice(0, 100);
   }
 
   private assertManager(roles: RoleName[]) {
-    if (!roles.some((role) => MANAGE_ROLES.has(role))) {
-      throw new ForbiddenException('Announcement management access is restricted.');
-    }
+    if (!roles.some((role) => MANAGE_ROLES.has(role))) throw new ForbiddenException('Announcement management access is restricted.');
   }
 
   private async resolveRecipients(tx: PrismaService, audienceType: string, audienceRef: string | null) {
@@ -121,23 +63,9 @@ export class AnnouncementsService {
       if (!user) throw new NotFoundException('Announcement recipient user not found.');
       return [user.id];
     }
-
-    if (audienceType === 'GUARDIANS') {
-      const users = await tx.user.findMany({ where: { roles: { some: { role: RoleName.GUARDIAN } }, status: 'ACTIVE' }, select: { id: true } });
-      return users.map((user) => user.id);
-    }
-
-    if (audienceType === 'TEACHERS') {
-      const users = await tx.user.findMany({ where: { roles: { some: { role: RoleName.TEACHER } }, status: 'ACTIVE' }, select: { id: true } });
-      return users.map((user) => user.id);
-    }
-
-    if (audienceType === 'STAFF') {
-      const users = await tx.user.findMany({ where: { status: 'ACTIVE', roles: { some: { role: { in: [RoleName.DIRECTOR, RoleName.PRINCIPAL, RoleName.OFFICE, RoleName.ACCOUNTANT, RoleName.TEACHER, RoleName.SUPPORT_STAFF] } } } }, select: { id: true } });
-      return users.map((user) => user.id);
-    }
-
-    const users = await tx.user.findMany({ where: { status: 'ACTIVE' }, select: { id: true } });
-    return users.map((user) => user.id);
+    if (audienceType === 'GUARDIANS') return (await tx.user.findMany({ where: { roles: { some: { role: RoleName.GUARDIAN } }, status: 'ACTIVE' }, select: { id: true } })).map((user) => user.id);
+    if (audienceType === 'TEACHERS') return (await tx.user.findMany({ where: { roles: { some: { role: RoleName.TEACHER } }, status: 'ACTIVE' }, select: { id: true } })).map((user) => user.id);
+    if (audienceType === 'STAFF') return (await tx.user.findMany({ where: { status: 'ACTIVE', roles: { some: { role: { in: [RoleName.DIRECTOR, RoleName.PRINCIPAL, RoleName.OFFICE, RoleName.ACCOUNTANT, RoleName.TEACHER, RoleName.SUPPORT_STAFF] } } } }, select: { id: true } })).map((user) => user.id);
+    return (await tx.user.findMany({ where: { status: 'ACTIVE' }, select: { id: true } })).map((user) => user.id);
   }
 }
