@@ -2,13 +2,11 @@ import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/commo
 import { RoleName } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
 
-const STAFF_ROLES = new Set<RoleName>([
+const PRIVILEGED_STUDENT_READ_ROLES = new Set<RoleName>([
   RoleName.DIRECTOR,
   RoleName.PRINCIPAL,
   RoleName.OFFICE,
   RoleName.ACCOUNTANT,
-  RoleName.TEACHER,
-  RoleName.SUPPORT_STAFF,
 ]);
 
 @Injectable()
@@ -51,7 +49,11 @@ export class StudentsService {
       where: { id: studentId },
       include: {
         guardians: {
-          include: { guardian: { include: { user: true } } },
+          select: {
+            relationship: true,
+            isPrimaryContact: true,
+            guardian: { select: { userId: true } },
+          },
         },
         enrolments: {
           orderBy: { enrolledAt: 'desc' },
@@ -64,10 +66,10 @@ export class StudentsService {
 
     if (!student) throw new NotFoundException('Student not found.');
 
-    const isStaff = roles.some((role) => STAFF_ROLES.has(role));
+    const isPrivilegedStaff = roles.some((role) => PRIVILEGED_STUDENT_READ_ROLES.has(role));
     const isLinkedGuardian = student.guardians.some((link) => link.guardian.userId === userId);
 
-    if (!isStaff && !isLinkedGuardian) {
+    if (!isPrivilegedStaff && !isLinkedGuardian) {
       throw new ForbiddenException('You do not have access to this student.');
     }
 
@@ -98,7 +100,7 @@ export class StudentsService {
           programme: enrolment.programme,
         },
       })),
-      documents: isStaff ? student.documents : [],
+      documents: isPrivilegedStaff ? student.documents : [],
     };
   }
 
