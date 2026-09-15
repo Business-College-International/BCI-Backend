@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Param, Query, Req, UseGuards } from '@nestjs/common';
 import { RoleName } from '@prisma/client';
 import { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -18,9 +18,10 @@ export class AttendanceAnalyticsController {
   @RequirePermissions(PERMISSIONS.ATTENDANCE_READ)
   getClassSummary(
     @Param('classId') classId: string,
-    @Query('termId') termId: string,
+    @Query('termId') termId: string | undefined,
     @Req() request: AuthenticatedRequest,
   ) {
+    if (!termId) throw new BadRequestException('termId is required.');
     return this.analytics.getClassSummary(classId, termId, request.user.id, request.user.roles);
   }
 
@@ -28,11 +29,12 @@ export class AttendanceAnalyticsController {
   @RequirePermissions(PERMISSIONS.ATTENDANCE_READ)
   getChronicAbsence(
     @Param('classId') classId: string,
-    @Query('termId') termId: string,
+    @Query('termId') termId: string | undefined,
     @Query('absenceRateThreshold') absenceRateThreshold: string | undefined,
     @Query('minimumSessions') minimumSessions: string | undefined,
     @Req() request: AuthenticatedRequest,
   ) {
+    if (!termId) throw new BadRequestException('termId is required.');
     return this.analytics.getChronicAbsence(
       classId,
       termId,
