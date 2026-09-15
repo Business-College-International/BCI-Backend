@@ -22,23 +22,18 @@ export class ApplicationsService {
       },
       select: {
         id: true,
-        firstName: true,
-        lastName: true,
-        levelApplied: true,
-        programmeApplied: true,
+        trackingCode: true,
         status: true,
         submittedAt: true,
       },
     });
   }
 
-  async findOne(id: string) {
+  async findByTrackingCode(trackingCode: string) {
     const application = await this.prisma.application.findUnique({
-      where: { id },
+      where: { trackingCode },
       select: {
-        id: true,
-        firstName: true,
-        lastName: true,
+        trackingCode: true,
         levelApplied: true,
         programmeApplied: true,
         status: true,
@@ -51,7 +46,11 @@ export class ApplicationsService {
   }
 
   async review(id: string, status: Exclude<ApplicationStatus, 'PENDING'>) {
-    if (![ApplicationStatus.UNDER_REVIEW, ApplicationStatus.ADMITTED, ApplicationStatus.REJECTED].includes(status)) {
+    if (![
+      ApplicationStatus.UNDER_REVIEW,
+      ApplicationStatus.ADMITTED,
+      ApplicationStatus.REJECTED,
+    ].includes(status)) {
       throw new Error('Unsupported review status');
     }
 
@@ -61,8 +60,6 @@ export class ApplicationsService {
       select: {
         id: true,
         status: true,
-        firstName: true,
-        lastName: true,
       },
     });
   }
