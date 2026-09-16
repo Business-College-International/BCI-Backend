@@ -138,17 +138,24 @@ export class FinanceBillingRunService {
     if (!term) throw new NotFoundException('Term not found.');
     if (term.status === 'CLOSED') throw new BadRequestException('Billing cannot be generated for a closed term.');
 
-    const [enrolments, schedules] = await Promise.all([
-      this.prisma.enrolment.findMany({
-        where: { termId: dto.termId, status: 'ACTIVE', ...(dto.classId ? { classId: dto.classId } : {}) },
-        include: { student: { select: { id: true, admissionNumber: true, firstName: true, lastName: true, status: true } }, class: { select: { id: true, name: true } } },
-        orderBy: [{ class: { name: 'asc' } }, { student: { lastName: 'asc' } }, { student: { firstName: 'asc' } }],
-      }),
+    const enrolments = await this.prisma.enrolment.findMany({
+      where: { termId: dto.termId, status: 'ACTIVE', ...(dto.classId ? { classId: dto.classId } : {}) },
+      include: { student: { select: { id: true, admissionNumber: true, firstName: true, lastName: true, status: true } }, class: { select: { id: true, name: true } } },
+      orderBy: [{ class: { name: 'asc' } }, { student: { lastName: 'asc' } }, { student: { firstName: 'asc' } }],
+    });
+
+    const [schedules, openInvoices] = await Promise.all([
       this.prisma.feeSchedule.findMany({ where: { termId: dto.termId, isActive: true }, orderBy: [{ level: 'asc' }, { programme: 'asc' }, { itemCode: 'asc' }] }),
+      enrolments.length === 0
+        ? Promise.resolve([] as Array<{ studentId: string }>)
+        : this.prisma.studentInvoice.findMany({
+            where: { termId: dto.termId, studentId: { in: enrolments.map((enrolment) => enrolment.student.id) }, status: { in: ['OPEN', 'PARTIALLY_PAID'] } },
+            select: { studentId: true },
+          }),
     ]);
 
     if (dto.classId && enrolments.length === 0) throw new NotFoundException('No active enrolments found for the selected class and term.');
-    return { term, enrolments, schedules };
+    return { term, enrolments, schedules, openInvoiceStudentIds: new Set(openInvoices.map((invoice) => invoice.studentId)) };
   }
 
   private buildCandidates(context: Awaited<ReturnType<FinanceBillingRunService['loadContext']>>, includeOptional: boolean) {
@@ -162,6 +169,9 @@ export class FinanceBillingRunService {
       const studentName = `${enrolment.student.firstName} ${enrolment.student.lastName}`.trim();
       if (enrolment.student.status !== 'ACTIVE') {
         return { studentId: enrolment.student.id, admissionNumber: enrolment.student.admissionNumber, studentName, classId: enrolment.class.id, className: enrolment.class.name, level: enrolment.level, programme: enrolment.programme, status: 'SKIP', reason: 'STUDENT_NOT_ACTIVE', feeScheduleIds: [], estimatedAmount: '0.00' };
+      }
+      if (context.openInvoiceStudentIds.has(enrolment.student.id)) {
+        return { studentId: enrolment.student.id, admissionNumber: enrolment.student.admissionNumber, studentName, classId: enrolment.class.id, className: enrolment.class.name, level: enrolment.level, programme: enrolment.programme, status: 'SKIP', reason: 'EXISTING_OPEN_INVOICE', feeScheduleIds: [], estimatedAmount: '0.00' };
       }
       if (schedules.length === 0) {
         return { studentId: enrolment.student.id, admissionNumber: enrolment.student.admissionNumber, studentName, classId: enrolment.class.id, className: enrolment.class.name, level: enrolment.level, programme: enrolment.programme, status: 'SKIP', reason: 'NO_MATCHING_FEE_SCHEDULE', feeScheduleIds: [], estimatedAmount: '0.00' };
