@@ -6,6 +6,7 @@ import { PermissionsGuard } from '../auth/permissions.guard';
 import { RequirePermissions } from '../auth/permissions.decorator';
 import { PERMISSIONS } from '../auth/permission-catalog';
 import { AttendanceService } from './attendance.service';
+import { AttendanceWriteGuard } from './attendance-write.guard';
 import { CreateAttendanceSessionDto } from './dto/create-attendance-session.dto';
 import { MarkAttendanceDto } from './dto/mark-attendance.dto';
 
@@ -35,6 +36,7 @@ export class AttendanceController {
   }
 
   @Post('sessions/:sessionId/records')
+  @UseGuards(AttendanceWriteGuard)
   @RequirePermissions(PERMISSIONS.ATTENDANCE_MANAGE)
   markAttendance(
     @Param('sessionId') sessionId: string,
