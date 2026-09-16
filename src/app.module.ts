@@ -7,6 +7,7 @@ import { AttendanceAnalyticsModule } from './modules/attendance/attendance-analy
 import { AttendanceModule } from './modules/attendance/attendance.module';
 import { AssessmentsModule } from './modules/assessments/assessments.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { AuditModule } from './modules/audit/audit.module';
 import { ConfigurationModule } from './modules/configuration/configuration.module';
 import { FinanceModule } from './modules/finance/finance.module';
 import { GuardiansModule } from './modules/guardians/guardians.module';
@@ -30,6 +31,7 @@ class HealthController {
 @Module({
   imports: [
     AuthModule,
+    AuditModule,
     AcademicReportsModule,
     AcademicsModule,
     AnnouncementsModule,
