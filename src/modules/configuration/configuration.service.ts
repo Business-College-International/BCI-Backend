@@ -42,7 +42,7 @@ export class ConfigurationService {
     if (dto.level && dto.level !== before.level && before.assignments.length > 0) throw new ConflictException('A subject already used in teaching assignments cannot change level.');
     return this.prisma.$transaction(async (tx) => {
       const subject = await tx.subject.update({ where: { id }, data: { name: dto.name?.trim(), level: dto.level, isElective: dto.isElective, programme: dto.programme, isActive: dto.isActive } });
-      await tx.auditLog.create({ data: { actorUserId, action: 'UPDATE', entityType: 'Subject', entityId: id, beforeJson: { name: before.name, level: before.level, programme: before.programme, isElective: before.isElective, isActive: before.isActive }, afterJson: { name: subject.name, level: subject.level, programme: subject.programme, isElective: subject.isElective, isActive: subject.isActive } });
+      await tx.auditLog.create({ data: { actorUserId, action: 'UPDATE', entityType: 'Subject', entityId: id, beforeJson: { name: before.name, level: before.level, programme: before.programme, isElective: before.isElective, isActive: before.isActive }, afterJson: { name: subject.name, level: subject.level, programme: subject.programme, isElective: subject.isElective, isActive: subject.isActive } } });
       return subject;
     });
   }
@@ -51,10 +51,7 @@ export class ConfigurationService {
     if (!roles.some((role) => FINANCE_MANAGERS.has(role) || ACADEMIC_MANAGERS.has(role))) throw new ForbiddenException('Fee schedule access is restricted.');
     const term = await this.prisma.term.findUnique({ where: { id: termId }, select: { id: true, academicYearId: true, code: true, name: true, status: true } });
     if (!term) throw new NotFoundException('Term not found.');
-    return {
-      term,
-      schedules: await this.prisma.feeSchedule.findMany({ where: { termId }, orderBy: [{ level: 'asc' }, { programme: 'asc' }, { itemCode: 'asc' }] }),
-    };
+    return { term, schedules: await this.prisma.feeSchedule.findMany({ where: { termId }, orderBy: [{ level: 'asc' }, { programme: 'asc' }, { itemCode: 'asc' }] }) };
   }
 
   async createFeeSchedule(dto: CreateFeeScheduleDto, actorUserId: string, roles: RoleName[]) {
@@ -80,34 +77,15 @@ export class ConfigurationService {
     const before = await this.prisma.feeSchedule.findUnique({ where: { id }, include: { charges: { select: { id: true }, take: 1 } } });
     if (!before) throw new NotFoundException('Fee schedule item not found.');
     if (dto.amount !== undefined && dto.amount < 0) throw new ConflictException('Fee amount cannot be negative.');
-    if (dto.amount !== undefined && new Prisma.Decimal(dto.amount).equals(before.amount) === false && before.charges.length > 0) {
-      throw new ConflictException('A fee amount cannot change after it has been used on an invoice line. Create a replacement fee item instead.');
-    }
+    if (dto.amount !== undefined && new Prisma.Decimal(dto.amount).equals(before.amount) === false && before.charges.length > 0) throw new ConflictException('A fee amount cannot change after it has been used on an invoice line. Create a replacement fee item instead.');
     if (before.termId && dto.isActive === false) {
       const term = await this.prisma.term.findUnique({ where: { id: before.termId }, select: { status: true } });
       if (term?.status === 'CLOSED' && before.isActive === false) throw new ConflictException('Fee schedule item is already inactive.');
     }
 
     return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.feeSchedule.update({
-        where: { id },
-        data: {
-          itemName: dto.itemName?.trim(),
-          ...(dto.amount !== undefined ? { amount: new Prisma.Decimal(dto.amount) } : {}),
-          isOptional: dto.isOptional,
-          isActive: dto.isActive,
-        },
-      });
-      await tx.auditLog.create({
-        data: {
-          actorUserId,
-          action: 'UPDATE',
-          entityType: 'FeeSchedule',
-          entityId: id,
-          beforeJson: { itemName: before.itemName, amount: before.amount.toString(), isOptional: before.isOptional, isActive: before.isActive },
-          afterJson: { itemName: updated.itemName, amount: updated.amount.toString(), isOptional: updated.isOptional, isActive: updated.isActive },
-        },
-      });
+      const updated = await tx.feeSchedule.update({ where: { id }, data: { itemName: dto.itemName?.trim(), ...(dto.amount !== undefined ? { amount: new Prisma.Decimal(dto.amount) } : {}), isOptional: dto.isOptional, isActive: dto.isActive } });
+      await tx.auditLog.create({ data: { actorUserId, action: 'UPDATE', entityType: 'FeeSchedule', entityId: id, beforeJson: { itemName: before.itemName, amount: before.amount.toString(), isOptional: before.isOptional, isActive: before.isActive }, afterJson: { itemName: updated.itemName, amount: updated.amount.toString(), isOptional: updated.isOptional, isActive: updated.isActive } } });
       return updated;
     });
   }
