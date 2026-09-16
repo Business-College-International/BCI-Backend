@@ -58,7 +58,7 @@ describe('rateLimitMiddleware', () => {
     expect(response.setHeader).toHaveBeenCalledWith('Retry-After', expect.any(String));
   });
 
-  it('keeps different tracking paths in separate buckets', () => {
+  it('shares the tracking quota across different tracking codes', () => {
     const firstRequest = makeRequest('/api/v1/applications/track/ABC123');
     const secondRequest = makeRequest('/api/v1/applications/track/XYZ789');
     const firstResponse = makeResponse();
@@ -70,7 +70,7 @@ describe('rateLimitMiddleware', () => {
     }
     rateLimitMiddleware(secondRequest, secondResponse, next);
 
-    expect(next).toHaveBeenCalledTimes(11);
-    expect(secondResponse.status).not.toHaveBeenCalledWith(429);
+    expect(next).toHaveBeenCalledTimes(10);
+    expect(secondResponse.status).toHaveBeenCalledWith(429);
   });
 });
