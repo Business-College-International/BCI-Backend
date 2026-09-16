@@ -25,6 +25,7 @@ describe('ReportReadinessService', () => {
 
     await expect(service.getClassReadiness('class-1', 'term-1', 'actor-1', ['OFFICE'] as never)).resolves.toMatchObject({
       totals: { readyStudents: 0, blockedStudents: 1 },
+      classReadiness: { ready: false, reasons: ['TERM_NOT_CLOSED', 'GRADING_POLICY_REQUIRED'] },
       students: [{ ready: false, reasons: ['TERM_NOT_CLOSED', 'GRADING_POLICY_REQUIRED'] }],
     });
   });
@@ -44,5 +45,20 @@ describe('ReportReadinessService', () => {
       totals: { readyStudents: 0, blockedStudents: 1 },
       students: [{ reasons: ['GRADING_POLICY_REQUIRED', 'MISSING_RESULTS'], missingAssessments: [{ assessmentId: 'assessment-2' }] }],
     });
+  });
+
+  it('explicitly blocks an empty class instead of returning a clean-looking zero-student result', async () => {
+    const { service, prisma } = makeService();
+    prisma.term.findUnique.mockResolvedValue({ id: 'term-1', name: 'Term 1', status: 'CLOSED', academicYearId: 'year-1' });
+    prisma.schoolClass.findUnique.mockResolvedValue({ id: 'class-1', name: 'New Class', academicYearId: 'year-1', level: 'P1', programme: 'NONE' });
+    prisma.enrolment.findMany.mockResolvedValue([]);
+    prisma.assessment.findMany.mockResolvedValue([]);
+
+    await expect(service.getClassReadiness('class-1', 'term-1', 'actor-1', ['OFFICE'] as never)).resolves.toMatchObject({
+      classReadiness: { ready: false, reasons: ['NO_ACTIVE_ENROLMENT', 'NO_ASSESSMENTS', 'GRADING_POLICY_REQUIRED'] },
+      totals: { activeStudents: 0, expectedAssessments: 0, readyStudents: 0, blockedStudents: 0 },
+      students: [],
+    });
+    expect(prisma.assessmentResult.findMany).not.toHaveBeenCalled();
   });
 });
