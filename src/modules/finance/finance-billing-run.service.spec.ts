@@ -6,6 +6,7 @@ function prismaStub(context: any) {
     term: { findUnique: jest.fn().mockResolvedValue(context.term) },
     enrolment: { findMany: jest.fn().mockResolvedValue(context.enrolments) },
     feeSchedule: { findMany: jest.fn().mockResolvedValue(context.schedules) },
+    studentInvoice: { findMany: jest.fn().mockResolvedValue(context.openInvoices ?? []) },
   };
 }
 
@@ -42,6 +43,20 @@ describe('FinanceBillingRunService', () => {
     const result = await service.preview({ termId: 'term-1', includeOptional: true }, ['DIRECTOR'] as any);
     expect(result.candidates[0].feeScheduleIds).toEqual(['fee-1', 'fee-2']);
     expect(result.estimatedInvoicedAmount).toBe('125.50');
+  });
+
+  it('marks an existing open invoice as a preview skip', async () => {
+    const service = new FinanceBillingRunService(prismaStub({
+      term,
+      enrolments: [{ student: { id: 'student-1', admissionNumber: 'BCI-1', firstName: 'Ama', lastName: 'Mensah', status: 'ACTIVE' }, class: { id: 'class-1', name: 'BUSINESS A' }, level: 'SHS1', programme: 'BUSINESS' }],
+      schedules: [{ id: 'fee-1', level: 'SHS1', programme: 'BUSINESS', amount: '1200.00', isOptional: false }],
+      openInvoices: [{ studentId: 'student-1' }],
+    }) as never);
+
+    const result = await service.preview({ termId: 'term-1' }, ['ACCOUNTANT'] as any);
+    expect(result.readyCount).toBe(0);
+    expect(result.skippedCount).toBe(1);
+    expect(result.candidates[0].reason).toBe('EXISTING_OPEN_INVOICE');
   });
 
   it('rejects billing for a closed term', async () => {
