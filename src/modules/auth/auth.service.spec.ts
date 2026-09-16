@@ -5,6 +5,7 @@ import { AuthService } from './auth.service';
 type MockPrisma = {
   user: { findUnique: jest.Mock };
   rolePermission: { findMany: jest.Mock };
+  refreshSession: { findUnique: jest.Mock };
   $transaction: jest.Mock;
 };
 
@@ -12,6 +13,7 @@ function makePrisma(): MockPrisma {
   return {
     user: { findUnique: jest.fn() },
     rolePermission: { findMany: jest.fn() },
+    refreshSession: { findUnique: jest.fn() },
     $transaction: jest.fn(),
   };
 }
@@ -69,5 +71,34 @@ describe('AuthService current-user contract', () => {
     const service = new AuthService(prisma as never, { signAsync: jest.fn() } as never);
 
     await expect(service.getCurrentUser('user-2')).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+});
+
+describe('AuthService refresh rotation', () => {
+  it('rejects a refresh token when the session was already rotated', async () => {
+    const prisma = makePrisma();
+    prisma.refreshSession.findUnique.mockResolvedValue({
+      id: 'session-1',
+      userId: 'user-1',
+      tokenHash: 'hashed-token',
+      revokedAt: null,
+      expiresAt: new Date(Date.now() + 60_000),
+      user: { id: 'user-1', tokenVersion: 3, status: UserStatus.ACTIVE, roles: [{ role: RoleName.GUARDIAN }] },
+    });
+
+    const tx = {
+      refreshSession: {
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        create: jest.fn(),
+        update: jest.fn(),
+      },
+    };
+    prisma.$transaction.mockImplementation(async (callback: (client: typeof tx) => unknown) => callback(tx));
+
+    const service = new AuthService(prisma as never, { signAsync: jest.fn() } as never);
+
+    await expect(service.refresh({ refreshToken: 'refresh-token' })).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(tx.refreshSession.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ id: 'session-1', revokedAt: null }) }));
+    expect(tx.refreshSession.create).not.toHaveBeenCalled();
   });
 });
