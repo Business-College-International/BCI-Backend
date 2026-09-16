@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { AuditAction, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
 
@@ -18,11 +18,25 @@ export class AuditService {
   constructor(private readonly prisma: PrismaService) {}
 
   async list(input: AuditListInput) {
-    const page = Math.max(1, input.page ?? 1);
-    const pageSize = Math.min(100, Math.max(1, input.pageSize ?? 50));
+    const requestedPage = input.page ?? 1;
+    const requestedPageSize = input.pageSize ?? 50;
+    if (!Number.isInteger(requestedPage) || requestedPage < 1) throw new BadRequestException('page must be a positive integer.');
+    if (!Number.isInteger(requestedPageSize) || requestedPageSize < 1) throw new BadRequestException('pageSize must be a positive integer.');
+
+    const page = requestedPage;
+    const pageSize = Math.min(100, requestedPageSize);
     const createdAt: Prisma.DateTimeFilter = {};
-    if (input.from) createdAt.gte = new Date(input.from);
-    if (input.to) createdAt.lte = new Date(input.to);
+
+    if (input.from) {
+      const from = new Date(input.from);
+      if (Number.isNaN(from.getTime())) throw new BadRequestException('from must be a valid date.');
+      createdAt.gte = from;
+    }
+    if (input.to) {
+      const to = new Date(input.to);
+      if (Number.isNaN(to.getTime())) throw new BadRequestException('to must be a valid date.');
+      createdAt.lte = to;
+    }
 
     const where: Prisma.AuditLogWhereInput = {
       ...(input.actorUserId ? { actorUserId: input.actorUserId } : {}),
