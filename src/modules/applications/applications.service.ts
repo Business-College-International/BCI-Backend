@@ -53,10 +53,17 @@ export class ApplicationsService {
     if (current.status !== 'PENDING' && current.status !== 'UNDER_REVIEW') throw new ConflictException('This application is already in a terminal state.');
 
     return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.application.update({ where: { id }, data: { status, reviewedBy: actorUserId }, select: { id: true, trackingCode: true, status: true, updatedAt: true } });
+      // Make the state transition conditional so a second concurrent reviewer
+      // cannot overwrite the outcome of the first reviewer.
+      const applicationTransition = await tx.application.updateMany({
+        where: { id, status: { in: ['PENDING', 'UNDER_REVIEW'] } },
+        data: { status, reviewedBy: actorUserId },
+      });
+      if (applicationTransition.count !== 1) throw new ConflictException('Application changed while it was being reviewed.');
+
       if (status === 'REJECTED') await tx.admissionDecisionRecord.create({ data: { applicationId: id, decision: AdmissionDecision.REJECTED, decidedBy: actorUserId, reason } });
       await tx.auditLog.create({ data: { actorUserId, action: status === 'REJECTED' ? 'REJECT' : 'UPDATE', entityType: 'Application', entityId: id, beforeJson: { status: current.status }, afterJson: { status } } });
-      return updated;
+      return { id, status, updatedAt: new Date() };
     });
   }
 
