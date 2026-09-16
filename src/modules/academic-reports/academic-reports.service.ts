@@ -38,9 +38,20 @@ export class AcademicReportsService {
 
     const term = await this.prisma.term.findUnique({
       where: { id: termId },
-      select: { id: true, code: true, name: true, startsAt: true, endsAt: true },
+      select: { id: true, code: true, name: true, startsAt: true, endsAt: true, academicYearId: true },
     });
     if (!term) throw new NotFoundException('Term not found.');
+
+    const enrolment = await this.prisma.enrolment.findFirst({
+      where: { studentId, termId, status: 'ACTIVE' },
+      select: {
+        id: true,
+        classId: true,
+        level: true,
+        programme: true,
+        class: { select: { id: true, name: true, division: true, room: true } },
+      },
+    });
 
     const scope = await this.resolveScope(studentId, termId, actorUserId, roles);
     if (!scope.allowed) throw new ForbiddenException('You do not have access to this academic report.');
@@ -48,22 +59,42 @@ export class AcademicReportsService {
       throw new ForbiddenException('This guardian is not permitted to view academic records for this ward.');
     }
 
-    const results = await this.prisma.assessmentResult.findMany({
-      where: { studentId, assessment: { termId } },
-      include: {
-        assessment: {
-          select: {
-            id: true,
-            title: true,
-            type: true,
-            maxScore: true,
-            weight: true,
-            subject: { select: { code: true, name: true } },
+    const [results, attendanceRecords] = await Promise.all([
+      this.prisma.assessmentResult.findMany({
+        where: { studentId, assessment: { termId } },
+        include: {
+          assessment: {
+            select: {
+              id: true,
+              title: true,
+              type: true,
+              maxScore: true,
+              weight: true,
+              subject: { select: { code: true, name: true } },
+            },
           },
         },
-      },
-      orderBy: [{ assessment: { subject: { name: 'asc' } } }, { assessment: { createdAt: 'asc' } }],
-    });
+        orderBy: [{ assessment: { subject: { name: 'asc' } } }, { assessment: { createdAt: 'asc' } }],
+      }),
+      this.prisma.attendanceRecord.findMany({
+        where: {
+          studentId,
+          session: {
+            termId,
+            ...(enrolment ? { classId: enrolment.classId } : {}),
+          },
+        },
+        select: {
+          id: true,
+          status: true,
+          markedAt: true,
+          session: {
+            select: { id: true, sessionDate: true, subjectId: true, periodLabel: true },
+          },
+        },
+        orderBy: { session: { sessionDate: 'asc' } },
+      }),
+    ]);
 
     const rows = results.map((result) => {
       const maxScore = Number(result.assessment.maxScore.toString());
@@ -124,9 +155,35 @@ export class AcademicReportsService {
       averagePercentage: Number((subject.percentages.reduce((sum, value) => sum + value, 0) / subject.percentages.length).toFixed(2)),
     }));
 
+    const attendanceCounts = attendanceRecords.reduce(
+      (acc, record) => {
+        acc.total += 1;
+        acc[record.status] += 1;
+        return acc;
+      },
+      { total: 0, PRESENT: 0, ABSENT: 0, LATE: 0, EXCUSED: 0 } as Record<string, number>,
+    );
+    const attendanceRate = attendanceCounts.total === 0
+      ? null
+      : Number((((attendanceCounts.PRESENT + attendanceCounts.LATE) / attendanceCounts.total) * 100).toFixed(2));
+
     return {
       student,
-      term,
+      term: {
+        id: term.id,
+        code: term.code,
+        name: term.name,
+        startsAt: term.startsAt,
+        endsAt: term.endsAt,
+      },
+      placement: enrolment
+        ? {
+            enrolmentId: enrolment.id,
+            level: enrolment.level,
+            programme: enrolment.programme,
+            class: enrolment.class,
+          }
+        : null,
       calculation: {
         overallPercentage,
         mode,
@@ -136,9 +193,28 @@ export class AcademicReportsService {
       },
       subjects,
       assessments: rows,
+      attendance: {
+        totalMarkedSessions: attendanceCounts.total,
+        present: attendanceCounts.PRESENT,
+        absent: attendanceCounts.ABSENT,
+        late: attendanceCounts.LATE,
+        excused: attendanceCounts.EXCUSED,
+        attendanceRate,
+        sessions: attendanceRecords.map((record) => ({
+          id: record.id,
+          status: record.status,
+          markedAt: record.markedAt,
+          session: record.session,
+        })),
+      },
       grading: {
         assigned: false,
         reason: 'No configurable school grading-band policy has been applied yet.',
+      },
+      publication: {
+        state: 'DRAFT_VIEW',
+        persisted: false,
+        immutableSnapshotId: null,
       },
     };
   }
