@@ -16,6 +16,8 @@ import { RefundService } from './refund.service';
 import { FinancialJournalService } from './financial-journal.service';
 import { FinanceStatementController } from './finance-statement.controller';
 import { FinanceStatementService } from './finance-statement.service';
+import { FinanceBillingRunController } from './finance-billing-run.controller';
+import { FinanceBillingRunService } from './finance-billing-run.service';
 
 @Module({
   imports: [AuthModule],
@@ -27,6 +29,7 @@ import { FinanceStatementService } from './finance-statement.service';
     FinanceIntegrityController,
     RefundController,
     FinanceStatementController,
+    FinanceBillingRunController,
   ],
   providers: [
     FinanceService,
@@ -37,6 +40,7 @@ import { FinanceStatementService } from './finance-statement.service';
     RefundService,
     FinancialJournalService,
     FinanceStatementService,
+    FinanceBillingRunService,
     PrismaService,
   ],
   exports: [RefundService, FinancialJournalService],
