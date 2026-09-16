@@ -30,12 +30,7 @@ export class WalletService {
 
     const wallet = await this.prisma.wallet.findUnique({
       where: { studentId },
-      include: {
-        transactions: {
-          orderBy: { createdAt: 'desc' },
-          take: 100,
-        },
-      },
+      select: { studentId: true, currency: true },
     });
 
     if (!wallet) {
@@ -49,34 +44,47 @@ export class WalletService {
       };
     }
 
-    const hasUnsupportedReversal = await this.prisma.walletTransaction.count({
-      where: { walletId: studentId, type: WalletTransactionType.REVERSAL },
-    });
-    if (hasUnsupportedReversal > 0) {
+    const [recentTransactions, reversalCount, topUps, withdrawals] = await Promise.all([
+      this.prisma.walletTransaction.findMany({
+        where: { walletId: studentId },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+      }),
+      this.prisma.walletTransaction.count({
+        where: { walletId: studentId, type: WalletTransactionType.REVERSAL },
+      }),
+      this.prisma.walletTransaction.aggregate({
+        where: { walletId: studentId, type: WalletTransactionType.TOP_UP },
+        _sum: { amount: true },
+      }),
+      this.prisma.walletTransaction.aggregate({
+        where: { walletId: studentId, type: WalletTransactionType.WITHDRAWAL },
+        _sum: { amount: true },
+      }),
+    ]);
+
+    const transactions = recentTransactions.map((transaction) => ({
+      id: transaction.id,
+      type: transaction.type,
+      amount: transaction.amount.toString(),
+      providerReference: transaction.providerReference,
+      processedBy: transaction.processedBy,
+      createdAt: transaction.createdAt,
+      note: transaction.note,
+    }));
+
+    if (reversalCount > 0) {
       return {
         student,
         exists: true,
         currency: wallet.currency,
         balance: null,
         balanceStatus: 'LEDGER_POLICY_REQUIRED',
-        transactions: wallet.transactions.map((transaction) => ({
-          id: transaction.id,
-          type: transaction.type,
-          amount: transaction.amount.toString(),
-          providerReference: transaction.providerReference,
-          processedBy: transaction.processedBy,
-          createdAt: transaction.createdAt,
-          note: transaction.note,
-        })),
+        transactions,
       };
     }
 
-    const balance = wallet.transactions.reduce((running, transaction) => {
-      if (transaction.type === WalletTransactionType.TOP_UP) return running.plus(transaction.amount);
-      if (transaction.type === WalletTransactionType.WITHDRAWAL) return running.minus(transaction.amount);
-      return running;
-    }, new Prisma.Decimal(0));
-
+    const balance = new Prisma.Decimal(topUps._sum.amount ?? 0).minus(withdrawals._sum.amount ?? 0);
     if (balance.lt(0)) {
       throw new ConflictException('Wallet ledger has a negative balance and requires reconciliation.');
     }
@@ -87,15 +95,7 @@ export class WalletService {
       currency: wallet.currency,
       balance: balance.toFixed(2),
       balanceStatus: 'CALCULATED',
-      transactions: wallet.transactions.map((transaction) => ({
-        id: transaction.id,
-        type: transaction.type,
-        amount: transaction.amount.toString(),
-        providerReference: transaction.providerReference,
-        processedBy: transaction.processedBy,
-        createdAt: transaction.createdAt,
-        note: transaction.note,
-      })),
+      transactions,
     };
   }
 
