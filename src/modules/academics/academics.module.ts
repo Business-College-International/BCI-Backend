@@ -5,10 +5,12 @@ import { AcademicsController } from './academics.controller';
 import { AcademicsService } from './academics.service';
 import { ClassRosterController } from './class-roster.controller';
 import { ClassRosterService } from './class-roster.service';
+import { TermClosureReadinessController } from './term-closure-readiness.controller';
+import { TermClosureReadinessService } from './term-closure-readiness.service';
 
 @Module({
   imports: [AuthModule],
-  controllers: [AcademicsController, ClassRosterController],
-  providers: [AcademicsService, ClassRosterService, PrismaService],
+  controllers: [AcademicsController, ClassRosterController, TermClosureReadinessController],
+  providers: [AcademicsService, ClassRosterService, TermClosureReadinessService, PrismaService],
 })
 export class AcademicsModule {}
