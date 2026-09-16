@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client';
 import { FinanceStatementService } from './finance-statement.service';
 
 describe('FinanceStatementService', () => {
-  it('counts only successful allocations and payments in the statement totals', async () => {
+  it('counts only successful fee allocations and payments in the statement totals', async () => {
     const prisma = {
       student: {
         findUnique: jest.fn().mockResolvedValue({
@@ -49,6 +49,12 @@ describe('FinanceStatementService', () => {
     expect(statement.summary).toEqual({ totalDue: '1000.00', totalPaid: '300.00', totalOutstanding: '700.00' });
     expect(statement.invoices[0].paid).toBe('300.00');
     expect(statement.receipts[0].amount).toBe('300.00');
+    expect(prisma.payment.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { studentId: 'student-1', status: 'SUCCEEDED', purpose: 'FEE' },
+    }));
+    expect(prisma.studentInvoice.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { studentId: 'student-1' },
+    }));
   });
 
   it('denies a guardian without fee permission', async () => {
