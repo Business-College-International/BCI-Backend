@@ -1,0 +1,108 @@
+name: Prisma Migration Review
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'prisma/schema.prisma'
+      - 'prisma/migrations/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/prisma-migration-review.yml'
+
+concurrency:
+  group: prisma-migration-review-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    name: Review database migration delta
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate Prisma schema
+        env:
+          DATABASE_URL: postgresql://bci:bci@localhost:5432/bci_migration_review?schema=public
+        run: npx prisma validate
+
+      - name: Generate Prisma client
+        env:
+          DATABASE_URL: postgresql://bci:bci@localhost:5432/bci_migration_review?schema=public
+        run: npx prisma generate
+
+      - name: Detect migration history
+        id: history
+        shell: bash
+        run: |
+          if [ -d prisma/migrations ] && find prisma/migrations -mindepth 1 -maxdepth 1 -type d | grep -q .; then
+            echo "has_migrations=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_migrations=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate reviewed migration delta from migration history
+        if: steps.history.outputs.has_migrations == 'true'
+        env:
+          DATABASE_URL: postgresql://bci:bci@localhost:5432/bci_migration_review?schema=public
+        run: |
+          mkdir -p artifacts
+          npx prisma migrate diff \
+            --from-migrations prisma/migrations \
+            --to-schema-datamodel prisma/schema.prisma \
+            --script > artifacts/migration-delta.sql
+
+      - name: Generate baseline schema artifact when migration history is absent
+        if: steps.history.outputs.has_migrations != 'true'
+        env:
+          DATABASE_URL: postgresql://bci:bci@localhost:5432/bci_migration_review?schema=public
+        run: |
+          mkdir -p artifacts
+          npx prisma migrate diff \
+            --from-empty \
+            --to-schema-datamodel prisma/schema.prisma \
+            --script > artifacts/schema-baseline.sql
+          printf '%s\n' \
+            'Migration history status: ABSENT' \
+            'Generated SQL is a baseline contract only and MUST NOT be treated as an incremental production migration.' \
+            'Before the first deployment of a live database, establish and review a canonical Prisma migration history.' \
+            > artifacts/MIGRATION_REVIEW.txt
+
+      - name: Reject destructive SQL in reviewed migration delta
+        if: steps.history.outputs.has_migrations == 'true'
+        shell: bash
+        run: |
+          if grep -Eiq '(^|[^a-z])(DROP TABLE|DROP COLUMN|TRUNCATE|DROP SCHEMA)([^a-z]|$)' artifacts/migration-delta.sql; then
+            echo 'Destructive SQL detected in the migration delta. This workflow will not auto-approve it.'
+            grep -Ein 'DROP TABLE|DROP COLUMN|TRUNCATE|DROP SCHEMA' artifacts/migration-delta.sql || true
+            exit 1
+          fi
+
+      - name: Review migration delta summary
+        shell: bash
+        run: |
+          if [ -f artifacts/migration-delta.sql ]; then
+            echo 'Migration history exists; reviewed incremental delta generated.'
+            wc -l artifacts/migration-delta.sql
+          else
+            echo 'No migration history exists; baseline-only artifact generated.'
+            cat artifacts/MIGRATION_REVIEW.txt
+          fi
+
+      - name: Upload migration review artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: bci-prisma-migration-review
+          path: artifacts/
+          retention-days: 7
