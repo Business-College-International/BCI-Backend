@@ -195,8 +195,9 @@ describe('StudentsService access boundaries', () => {
 });
 
 describe('StudentsService guardian management', () => {
-  it('links a guardian and clears an existing primary contact atomically', async () => {
+  it('serializes primary-guardian replacement for the same student', async () => {
     const tx = {
+      $executeRaw: jest.fn(),
       student: { findUnique: jest.fn().mockResolvedValue({ id: 'student-1', status: 'ACTIVE' }) },
       guardian: { findUnique: jest.fn().mockResolvedValue({ personId: 'guardian-1', userId: 'guardian-user-1' }) },
       guardianStudent: {
@@ -224,6 +225,7 @@ describe('StudentsService guardian management', () => {
       isPrimaryContact: true,
     });
 
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
     expect(tx.guardianStudent.updateMany).toHaveBeenCalledWith({
       where: { studentId: 'student-1' },
       data: { isPrimaryContact: false },
@@ -232,8 +234,42 @@ describe('StudentsService guardian management', () => {
     expect(tx.auditLog.create).toHaveBeenCalled();
   });
 
+  it('does not acquire the primary lock when creating a non-primary guardian link', async () => {
+    const tx = {
+      $executeRaw: jest.fn(),
+      student: { findUnique: jest.fn().mockResolvedValue({ id: 'student-1', status: 'ACTIVE' }) },
+      guardian: { findUnique: jest.fn().mockResolvedValue({ personId: 'guardian-1', userId: 'guardian-user-1' }) },
+      guardianStudent: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        updateMany: jest.fn(),
+        create: jest.fn().mockResolvedValue({
+          id: 'link-3',
+          guardianId: 'guardian-1',
+          studentId: 'student-1',
+          relationship: 'guardian',
+          isPrimaryContact: false,
+          canViewAcademic: true,
+          canPayFees: true,
+          canManageWallet: true,
+        }),
+      },
+      auditLog: { create: jest.fn() },
+    };
+    const prisma = makePrisma({ $transaction: jest.fn(async (callback) => callback(tx)) });
+    const service = new StudentsService(prisma as never);
+
+    await service.linkGuardian('student-1', 'office-user-1', {
+      guardianId: 'guardian-1',
+      relationship: 'guardian',
+      isPrimaryContact: false,
+    });
+
+    expect(tx.$executeRaw).not.toHaveBeenCalled();
+  });
+
   it('rejects duplicate guardian links', async () => {
     const tx = {
+      $executeRaw: jest.fn(),
       student: { findUnique: jest.fn().mockResolvedValue({ id: 'student-1', status: 'ACTIVE' }) },
       guardian: { findUnique: jest.fn().mockResolvedValue({ personId: 'guardian-1', userId: 'guardian-user-1' }) },
       guardianStudent: {
