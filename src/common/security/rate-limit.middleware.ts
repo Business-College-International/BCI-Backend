@@ -18,6 +18,12 @@ function clientKey(request: Request): string {
   return source?.trim() || request.ip || request.socket.remoteAddress || 'unknown';
 }
 
+function bucketScopeForPath(path: string): string {
+  if (path.includes('/auth/')) return '/api/v1/auth';
+  if (path === '/api/v1/applications' || path.startsWith('/api/v1/applications/track/')) return '/api/v1/applications';
+  return path;
+}
+
 function limitForPath(path: string): number {
   if (path.includes('/auth/')) return AUTH_LIMIT;
   if (path === '/api/v1/applications' || path.startsWith('/api/v1/applications/track/')) return PUBLIC_APPLICATION_LIMIT;
@@ -25,7 +31,7 @@ function limitForPath(path: string): number {
 }
 
 export function rateLimitMiddleware(request: Request, response: Response, next: NextFunction): void {
-  const key = `${clientKey(request)}:${request.path}`;
+  const key = `${clientKey(request)}:${bucketScopeForPath(request.path)}`;
   const now = Date.now();
   const limit = limitForPath(request.path);
   const bucket = buckets.get(key);
