@@ -1,5 +1,4 @@
 import { Injectable, NotImplementedException } from '@nestjs/common';
-import { MoolreAdapter } from './moolre.adapter';
 import { PaymentProviderPort, ProviderWebhook, VerifiedProviderWebhook } from './payment-provider.port';
 import { NormalizedPaymentWebhook } from './payment-webhook.normalization';
 
