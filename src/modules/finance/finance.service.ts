@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InvoiceStatus, Prisma, RoleName } from '@prisma/client';
+import { InvoiceStatus, PaymentStatus, Prisma, RoleName } from '@prisma/client';
 import { randomBytes } from 'node:crypto';
 import { PrismaService } from '../../prisma.service';
 import { CreateFeeScheduleDto } from './dto/create-fee-schedule.dto';
@@ -28,6 +28,11 @@ type InvoiceViewSource = {
   dueAt: Date | null;
   notes: string | null;
   lines: Array<{ id: string; description: string; amountDue: Prisma.Decimal }>;
+};
+
+type InvoiceAllocation = {
+  amount: Prisma.Decimal;
+  payment?: { status: PaymentStatus };
 };
 
 @Injectable()
@@ -200,7 +205,10 @@ export class FinanceService {
 
     const invoices = await this.prisma.studentInvoice.findMany({
       where: { studentId },
-      include: { lines: true, allocations: true },
+      include: {
+        lines: true,
+        allocations: { include: { payment: { select: { status: true } } } },
+      },
       orderBy: { issuedAt: 'desc' },
     });
 
@@ -273,7 +281,9 @@ export class FinanceService {
     const totals = invoices.reduce(
       (acc, invoice) => {
         const due = invoice.lines.reduce((sum, line) => sum.plus(line.amountDue), new Prisma.Decimal(0));
-        const paid = invoice.allocations.reduce((sum, allocation) => sum.plus(allocation.amount), new Prisma.Decimal(0));
+        const paid = invoice.allocations
+          .filter((allocation) => allocation.payment.status === PaymentStatus.SUCCEEDED)
+          .reduce((sum, allocation) => sum.plus(allocation.amount), new Prisma.Decimal(0));
         acc.invoiced = acc.invoiced.plus(due);
         acc.paidAllocated = acc.paidAllocated.plus(paid);
         acc.outstanding = acc.outstanding.plus(due.minus(paid));
@@ -358,15 +368,14 @@ export class FinanceService {
     throw new ForbiddenException(`Finance access is restricted for user ${actorUserId}.`);
   }
 
-  private toInvoiceView(invoice: InvoiceViewSource, allocations: Array<{ amount: Prisma.Decimal }>) {
+  private toInvoiceView(invoice: InvoiceViewSource, allocations: InvoiceAllocation[]) {
     const total = invoice.lines.reduce(
       (sum, line) => sum.plus(line.amountDue),
       new Prisma.Decimal(0),
     );
-    const allocated = allocations.reduce(
-      (sum, allocation) => sum.plus(allocation.amount),
-      new Prisma.Decimal(0),
-    );
+    const allocated = allocations
+      .filter((allocation) => allocation.payment?.status === PaymentStatus.SUCCEEDED)
+      .reduce((sum, allocation) => sum.plus(allocation.amount), new Prisma.Decimal(0));
 
     return {
       id: invoice.id,
