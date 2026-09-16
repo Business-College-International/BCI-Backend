@@ -66,6 +66,14 @@ export class ApplicationsService {
     if (current.status !== 'UNDER_REVIEW') throw new ConflictException('Only applications under review can be admitted.');
 
     return this.prisma.$transaction(async (tx) => {
+      // Serialize admissions for the same class/term so capacity cannot be
+      // exceeded by two concurrent requests that both observe the same count.
+      await tx.$executeRaw`
+        SELECT pg_advisory_xact_lock(
+          hashtext(concat('bci:admission-capacity:', ${dto.classId}, ':', ${dto.termId}))
+        )
+      `;
+
       const [academicYear, term, schoolClass] = await Promise.all([tx.academicYear.findUnique({ where: { id: dto.academicYearId } }), tx.term.findUnique({ where: { id: dto.termId } }), tx.schoolClass.findUnique({ where: { id: dto.classId } })]);
       if (!academicYear || !term || !schoolClass) throw new NotFoundException('Academic year, term, or class was not found.');
       if (term.academicYearId !== academicYear.id) throw new BadRequestException('The selected term does not belong to the selected academic year.');
