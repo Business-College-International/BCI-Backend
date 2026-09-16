@@ -1,3 +1,5 @@
+import { NormalizedPaymentWebhook } from './payment-webhook.normalization';
+
 export type ProviderWebhook = {
   provider: string;
   eventId: string;
@@ -14,6 +16,8 @@ export interface PaymentProviderPort {
   readonly provider: string;
 
   verifyWebhook(input: ProviderWebhook): Promise<VerifiedProviderWebhook>;
+
+  normalizeWebhook(input: VerifiedProviderWebhook): NormalizedPaymentWebhook;
 
   initiatePayment(input: {
     clientReference: string;
