@@ -7,10 +7,11 @@ import { ClassRosterController } from './class-roster.controller';
 import { ClassRosterService } from './class-roster.service';
 import { TermClosureReadinessController } from './term-closure-readiness.controller';
 import { TermClosureReadinessService } from './term-closure-readiness.service';
+import { TermLifecycleService } from './term-lifecycle.service';
 
 @Module({
   imports: [AuthModule],
   controllers: [AcademicsController, ClassRosterController, TermClosureReadinessController],
-  providers: [AcademicsService, ClassRosterService, TermClosureReadinessService, PrismaService],
+  providers: [AcademicsService, ClassRosterService, TermClosureReadinessService, TermLifecycleService, PrismaService],
 })
 export class AcademicsModule {}
