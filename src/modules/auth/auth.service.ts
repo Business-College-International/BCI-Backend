@@ -101,10 +101,20 @@ export class AuthService {
     const tokenHash = this.hashRefreshToken(dto.refreshToken);
     const session = await this.prisma.refreshSession.findUnique({ where: { tokenHash }, include: { user: { include: { roles: true } } } });
     if (!session || session.revokedAt || session.expiresAt <= new Date() || session.user.status !== UserStatus.ACTIVE) throw new UnauthorizedException('Refresh session is invalid or expired.');
+
     return this.prisma.$transaction(async (tx) => {
+      const now = new Date();
+      const rotated = await tx.refreshSession.updateMany({
+        where: { id: session.id, tokenHash, revokedAt: null },
+        data: { revokedAt: now, lastUsedAt: now },
+      });
+      if (rotated.count !== 1) {
+        throw new UnauthorizedException('Refresh session is invalid or has already been rotated.');
+      }
+
       const refreshToken = randomBytes(48).toString('base64url');
-      const replacement = await tx.refreshSession.create({ data: { userId: session.userId, tokenHash: this.hashRefreshToken(refreshToken), expiresAt: this.refreshExpiry(), lastUsedAt: new Date() } });
-      await tx.refreshSession.update({ where: { id: session.id }, data: { revokedAt: new Date(), lastUsedAt: new Date(), replacedById: replacement.id } });
+      const replacement = await tx.refreshSession.create({ data: { userId: session.userId, tokenHash: this.hashRefreshToken(refreshToken), expiresAt: this.refreshExpiry(), lastUsedAt: now } });
+      await tx.refreshSession.update({ where: { id: session.id }, data: { replacedById: replacement.id } });
       const accessToken = await this.signAccessToken(session.user.id, session.user.tokenVersion, session.user.roles.map((r) => r.role));
       return { accessToken, refreshToken };
     });
