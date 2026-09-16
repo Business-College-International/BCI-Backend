@@ -1,5 +1,5 @@
 import { ForbiddenException } from '@nestjs/common';
-import { InvoiceStatus, PaymentStatus, RoleName } from '@prisma/client';
+import { InvoiceStatus, PaymentStatus, Prisma, RoleName } from '@prisma/client';
 import { FinanceIntegrityService } from './finance-integrity.service';
 
 function mockPrisma() {
@@ -18,28 +18,28 @@ describe('FinanceIntegrityService', () => {
       .rejects.toBeInstanceOf(ForbiddenException);
   });
 
-  it('flags a failed payment allocation and a succeeded payment without a receipt', async () => {
+  it('flags invalid allocation state and succeeded payments without receipts', async () => {
     const prisma = mockPrisma();
     prisma.studentInvoice.findMany.mockResolvedValue([
       {
         id: 'invoice-1',
         invoiceNumber: 'BCI-2026-001',
         status: InvoiceStatus.PARTIALLY_PAID,
-        lines: [{ amountDue: { plus: () => ({}) } }],
+        lines: [{ amountDue: new Prisma.Decimal('100.00') }],
       },
     ]);
     prisma.payment.findMany.mockResolvedValue([
       {
         id: 'payment-1',
         status: PaymentStatus.SUCCEEDED,
-        amount: { toFixed: () => '60.00' },
+        amount: new Prisma.Decimal('60.00'),
         completedAt: null,
         receipt: null,
       },
       {
         id: 'payment-2',
         status: PaymentStatus.FAILED,
-        amount: { toFixed: () => '40.00' },
+        amount: new Prisma.Decimal('40.00'),
         completedAt: null,
         receipt: null,
       },
@@ -49,24 +49,27 @@ describe('FinanceIntegrityService', () => {
         id: 'allocation-1',
         paymentId: 'payment-1',
         invoiceId: 'invoice-1',
-        amount: { toFixed: () => '60.00' },
-        payment: { id: 'payment-1', status: PaymentStatus.SUCCEEDED, amount: { toFixed: () => '60.00' } },
+        amount: new Prisma.Decimal('60.00'),
+        payment: { id: 'payment-1', status: PaymentStatus.SUCCEEDED, amount: new Prisma.Decimal('60.00') },
         invoice: { id: 'invoice-1', invoiceNumber: 'BCI-2026-001' },
       },
       {
         id: 'allocation-2',
         paymentId: 'payment-2',
         invoiceId: 'invoice-1',
-        amount: { toFixed: () => '40.00' },
-        payment: { id: 'payment-2', status: PaymentStatus.FAILED, amount: { toFixed: () => '40.00' } },
+        amount: new Prisma.Decimal('40.00'),
+        payment: { id: 'payment-2', status: PaymentStatus.FAILED, amount: new Prisma.Decimal('40.00') },
         invoice: { id: 'invoice-1', invoiceNumber: 'BCI-2026-001' },
       },
     ]);
 
     const service = new FinanceIntegrityService(prisma);
+    const report = await service.getIntegrityReport('accountant-1', [RoleName.ACCOUNTANT]);
 
-    // The mock decimal operations above are only placeholders for this authorization/data-shape contract.
-    // The production path runs against Prisma.Decimal and is covered by the reconciliation workflow.
-    await expect(service.getIntegrityReport('accountant-1', [RoleName.ACCOUNTANT])).rejects.toThrow();
+    expect(report.healthy).toBe(false);
+    expect(report.findings.invalidStatusAllocations).toHaveLength(1);
+    expect(report.findings.invalidStatusAllocations[0].paymentId).toBe('payment-2');
+    expect(report.findings.succeededWithoutReceipt).toHaveLength(1);
+    expect(report.findings.succeededWithoutReceipt[0].paymentId).toBe('payment-1');
   });
 });
