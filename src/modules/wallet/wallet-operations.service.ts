@@ -9,13 +9,6 @@ import { Prisma, RoleName, WalletTransactionType } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
 import { WithdrawWalletDto } from './dto/withdraw-wallet.dto';
 
-const PRIVILEGED_WALLET_ROLES = new Set<RoleName>([
-  RoleName.DIRECTOR,
-  RoleName.PRINCIPAL,
-  RoleName.OFFICE,
-  RoleName.ACCOUNTANT,
-]);
-
 @Injectable()
 export class WalletOperationsService {
   constructor(private readonly prisma: PrismaService) {}
