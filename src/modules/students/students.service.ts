@@ -237,6 +237,18 @@ export class StudentsService {
 
   async linkGuardian(studentId: string, actorUserId: string, dto: LinkGuardianDto) {
     return this.prisma.$transaction(async (tx) => {
+      // Serialize guardian-primary mutations per student. This closes the race
+      // between clearing the current primary and creating the replacement.
+      // The canonical PostgreSQL migration must still add the partial unique
+      // index so the invariant is enforced for every writer, not only this API.
+      if (dto.isPrimaryContact) {
+        await tx.$executeRaw`
+          SELECT pg_advisory_xact_lock(
+            hashtext(concat('bci:guardian-primary:', ${studentId}))
+          )
+        `;
+      }
+
       const [student, guardian] = await Promise.all([
         tx.student.findUnique({ where: { id: studentId }, select: { id: true, status: true } }),
         tx.guardian.findUnique({ where: { personId: dto.guardianId }, select: { personId: true, userId: true } }),
