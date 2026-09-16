@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PaymentStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
 import { NormalizedPaymentWebhook } from './payment-webhook.normalization';
@@ -43,16 +43,16 @@ export class PaymentWebhookProcessor {
       if (normalized.amount !== null && normalized.amount !== payment.amount.toFixed(2)) {
         await tx.providerWebhookEvent.update({
           where: { id: event.id },
-          data: { processedAt: new Date(), processingError: 'Provider amount does not match the payment record.' },
+          data: { processedAt: new Date(), processingError: 'Provider payment amount does not match the payment record.' },
         });
-        throw new BadRequestException('Provider payment amount does not match the payment record.');
+        return { applied: false, reason: 'amount-mismatch' as const };
       }
       if (normalized.currency !== null && normalized.currency !== payment.currency) {
         await tx.providerWebhookEvent.update({
           where: { id: event.id },
-          data: { processedAt: new Date(), processingError: 'Provider currency does not match the payment record.' },
+          data: { processedAt: new Date(), processingError: 'Provider payment currency does not match the payment record.' },
         });
-        throw new BadRequestException('Provider payment currency does not match the payment record.');
+        return { applied: false, reason: 'currency-mismatch' as const };
       }
 
       if (TERMINAL_STATUSES.has(payment.status) && payment.status !== normalized.paymentStatus) {
