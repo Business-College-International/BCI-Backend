@@ -20,7 +20,7 @@ function clientKey(request: Request): string {
 
 function limitForPath(path: string): number {
   if (path.includes('/auth/')) return AUTH_LIMIT;
-  if (path === '/api/v1/applications') return PUBLIC_APPLICATION_LIMIT;
+  if (path === '/api/v1/applications' || path.startsWith('/api/v1/applications/track/')) return PUBLIC_APPLICATION_LIMIT;
   return GENERAL_LIMIT;
 }
 
