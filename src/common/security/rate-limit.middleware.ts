@@ -15,12 +15,12 @@ const PUBLIC_APPLICATION_LIMIT = 10;
 function clientKey(request: Request): string {
   const forwarded = request.headers['x-forwarded-for'];
   const source = Array.isArray(forwarded) ? forwarded[0] : forwarded?.split(',')[0];
-  return (source?.trim() || request.ip || request.socket.remoteAddress || 'unknown');
+  return source?.trim() || request.ip || request.socket.remoteAddress || 'unknown';
 }
 
 function limitForPath(path: string): number {
   if (path.includes('/auth/')) return AUTH_LIMIT;
-  if (path === '/api/v1/applications' && path !== '') return PUBLIC_APPLICATION_LIMIT;
+  if (path === '/api/v1/applications') return PUBLIC_APPLICATION_LIMIT;
   return GENERAL_LIMIT;
 }
 
