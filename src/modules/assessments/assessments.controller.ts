@@ -6,6 +6,7 @@ import { PermissionsGuard } from '../auth/permissions.guard';
 import { RequirePermissions } from '../auth/permissions.decorator';
 import { PERMISSIONS } from '../auth/permission-catalog';
 import { AssessmentsService } from './assessments.service';
+import { AssessmentWriteGuard } from './assessment-write.guard';
 import { CreateAssessmentDto } from './dto/create-assessment.dto';
 import { EnterAssessmentResultsDto } from './dto/enter-assessment-results.dto';
 
@@ -43,6 +44,7 @@ export class AssessmentsController {
   }
 
   @Post(':assessmentId/results')
+  @UseGuards(AssessmentWriteGuard)
   @RequirePermissions(PERMISSIONS.ASSESSMENTS_MANAGE)
   enterResults(
     @Param('assessmentId') assessmentId: string,
