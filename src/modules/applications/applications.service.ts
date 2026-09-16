@@ -63,7 +63,10 @@ export class ApplicationsService {
 
       if (status === 'REJECTED') await tx.admissionDecisionRecord.create({ data: { applicationId: id, decision: AdmissionDecision.REJECTED, decidedBy: actorUserId, reason } });
       await tx.auditLog.create({ data: { actorUserId, action: status === 'REJECTED' ? 'REJECT' : 'UPDATE', entityType: 'Application', entityId: id, beforeJson: { status: current.status }, afterJson: { status } } });
-      return { id, status, updatedAt: new Date() };
+      return tx.application.findUnique({
+        where: { id },
+        select: { id: true, trackingCode: true, status: true, updatedAt: true },
+      });
     });
   }
 
