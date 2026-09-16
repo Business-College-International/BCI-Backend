@@ -15,7 +15,7 @@ export class AttendanceWriteGuard implements CanActivate {
   async canActivate(context: ExecutionContext) {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
     const sessionId = request.params?.sessionId;
-    if (!sessionId) return true;
+    if (typeof sessionId !== 'string' || !sessionId) return true;
 
     const session = await this.prisma.attendanceSession.findUnique({
       where: { id: sessionId },

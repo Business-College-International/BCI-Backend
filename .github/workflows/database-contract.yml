@@ -45,7 +45,7 @@ jobs:
           PGPASSWORD: bci
         run: psql -h localhost -U bci -d bci_contract -v ON_ERROR_STOP=1 --file=/tmp/bci-initial.sql
       - name: Verify database matches Prisma schema
-        run: npx prisma migrate diff --from-schema-datasource prisma/schema.prisma --to-schema-database "$DATABASE_URL" --exit-code
+        run: npx prisma migrate diff --from-schema-datasource prisma/schema.prisma --to-url "$DATABASE_URL" --exit-code
       - run: npm run build
       - run: npm test -- --passWithNoTests
       - name: Upload generated initial SQL

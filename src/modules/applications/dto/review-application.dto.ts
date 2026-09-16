@@ -1,9 +1,9 @@
-import { IsEnum, IsOptional, IsString, Length } from 'class-validator';
+import { IsIn, IsOptional, IsString, Length } from 'class-validator';
 import { ApplicationStatus } from '@prisma/client';
 
 export class ReviewApplicationDto {
-  @IsEnum(ApplicationStatus)
-  status!: ApplicationStatus.UNDER_REVIEW | ApplicationStatus.REJECTED;
+  @IsIn(['UNDER_REVIEW', 'REJECTED'])
+  status!: Extract<ApplicationStatus, 'UNDER_REVIEW' | 'REJECTED'>;
 
   @IsOptional()
   @IsString()
