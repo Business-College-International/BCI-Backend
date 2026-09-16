@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
-import { InvoiceStatus, RoleName } from '@prisma/client';
+import { InvoiceStatus, PaymentStatus, RoleName } from '@prisma/client';
 import { FinanceService } from './finance.service';
 
 function mockPrisma() {
@@ -91,5 +91,32 @@ describe('FinanceService', () => {
     await expect(
       service.listStudentInvoices('student-1', 'accountant-user-1', [RoleName.ACCOUNTANT]),
     ).resolves.toEqual([]);
+  });
+
+  it('excludes allocations linked to non-succeeded payments from invoice balances', async () => {
+    const prisma = mockPrisma();
+    prisma.studentInvoice.findMany.mockResolvedValue([
+      {
+        id: 'invoice-1',
+        invoiceNumber: 'BCI-2026-TEST',
+        studentId: 'student-1',
+        termId: 'term-1',
+        status: InvoiceStatus.OPEN,
+        issuedAt: new Date('2026-09-01T00:00:00.000Z'),
+        dueAt: null,
+        notes: null,
+        lines: [{ id: 'line-1', description: 'Tuition', amountDue: { toString: () => '100.00', toFixed: () => '100.00' } }],
+        allocations: [
+          { amount: { toString: () => '40.00', toFixed: () => '40.00' }, payment: { status: PaymentStatus.SUCCEEDED } },
+          { amount: { toString: () => '60.00', toFixed: () => '60.00' }, payment: { status: PaymentStatus.FAILED } },
+        ],
+      },
+    ]);
+
+    const service = new FinanceService(prisma);
+    const result = await service.listStudentInvoices('student-1', 'accountant-user-1', [RoleName.ACCOUNTANT]);
+
+    expect(result[0].amountAllocated).toBe('40.00');
+    expect(result[0].outstandingAmount).toBe('60.00');
   });
 });
