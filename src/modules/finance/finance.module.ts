@@ -11,6 +11,9 @@ import { PaymentPreflightController } from './payment-preflight.controller';
 import { PaymentPreflightService } from './payment-preflight.service';
 import { FinanceIntegrityController } from './finance-integrity.controller';
 import { FinanceIntegrityService } from './finance-integrity.service';
+import { RefundController } from './refund.controller';
+import { RefundService } from './refund.service';
+import { FinancialJournalService } from './financial-journal.service';
 
 @Module({
   imports: [AuthModule],
@@ -20,6 +23,7 @@ import { FinanceIntegrityService } from './finance-integrity.service';
     FinanceReceivablesController,
     PaymentPreflightController,
     FinanceIntegrityController,
+    RefundController,
   ],
   providers: [
     FinanceService,
@@ -27,7 +31,10 @@ import { FinanceIntegrityService } from './finance-integrity.service';
     FinanceReceivablesService,
     PaymentPreflightService,
     FinanceIntegrityService,
+    RefundService,
+    FinancialJournalService,
     PrismaService,
   ],
+  exports: [RefundService, FinancialJournalService],
 })
 export class FinanceModule {}
