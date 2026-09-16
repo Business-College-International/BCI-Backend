@@ -8,9 +8,7 @@ function makePrisma(tx: any) {
 
 describe('ConfigurationService', () => {
   it('rejects subject level changes when the subject is already assigned', async () => {
-    const prisma = {
-      subject: { findUnique: jest.fn().mockResolvedValue({ id: 'subject-1', name: 'Mathematics', level: 'SHS1', programme: 'NONE', isElective: false, isActive: true, assignments: [{ id: 'assignment-1' }] }) },
-    };
+    const prisma = { subject: { findUnique: jest.fn().mockResolvedValue({ id: 'subject-1', name: 'Mathematics', level: 'SHS1', programme: 'NONE', isElective: false, isActive: true, assignments: [{ id: 'assignment-1' }] }) } };
     const service = new ConfigurationService(prisma as never);
     await expect(service.updateSubject('subject-1', { level: 'SHS2' as any }, 'actor-1', ['DIRECTOR'] as any)).rejects.toBeInstanceOf(ConflictException);
   });
@@ -37,9 +35,7 @@ describe('ConfigurationService', () => {
   });
 
   it('blocks fee amount changes after the item has been used on an invoice', async () => {
-    const prisma = {
-      feeSchedule: { findUnique: jest.fn().mockResolvedValue({ id: 'fee-1', termId: 'term-1', itemName: 'Tuition', amount: new Prisma.Decimal('1200.00'), isOptional: false, isActive: true, charges: [{ id: 'line-1' }] }) },
-    };
+    const prisma = { feeSchedule: { findUnique: jest.fn().mockResolvedValue({ id: 'fee-1', termId: 'term-1', itemName: 'Tuition', amount: new Prisma.Decimal('1200.00'), isOptional: false, isActive: true, charges: [{ id: 'line-1' }] }) } };
     const service = new ConfigurationService(prisma as never);
     await expect(service.updateFeeSchedule('fee-1', { amount: 1300 }, 'actor-1', ['ACCOUNTANT'] as any)).rejects.toBeInstanceOf(ConflictException);
   });
@@ -51,6 +47,7 @@ describe('ConfigurationService', () => {
     };
     const prisma = {
       feeSchedule: { findUnique: jest.fn().mockResolvedValue({ id: 'fee-1', termId: 'term-1', itemName: 'Tuition', amount: new Prisma.Decimal('1200.00'), isOptional: false, isActive: true, charges: [{ id: 'line-1' }] }) },
+      term: { findUnique: jest.fn().mockResolvedValue({ status: 'OPEN' }) },
       $transaction: async (callback: (client: any) => unknown) => callback(tx),
     };
     const service = new ConfigurationService(prisma as never);

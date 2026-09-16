@@ -2,7 +2,7 @@ import { SubstitutionValidatorService } from './substitution-validator.service';
 
 describe('SubstitutionValidatorService', () => {
   const prisma = {
-    teacherAssignment: { findFirst: jest.fn() },
+    teacherAssignment: { findFirst: jest.fn(), findMany: jest.fn() },
     staff: { findUnique: jest.fn(), findMany: jest.fn() },
   } as any;
   const service = new SubstitutionValidatorService(prisma);
@@ -19,7 +19,7 @@ describe('SubstitutionValidatorService', () => {
     prisma.staff.findUnique
       .mockResolvedValueOnce({ personId: 'sub', employmentStatus: 'active' })
       .mockResolvedValueOnce({ personId: 'orig', employmentStatus: 'active' });
-    prisma.teacherAssignment.findMany = jest.fn().mockResolvedValue([]);
+    prisma.teacherAssignment.findMany.mockResolvedValue([]);
     prisma.staff.findMany.mockResolvedValue([]);
 
     const result = await service.validate({ termId: 'term', originalStaffId: 'orig', substituteStaffId: 'sub', classId: 'class', subjectId: 'subject', dayOfWeek: 1, startsAt: '2026-09-16T08:00:00.000Z', endsAt: '2026-09-16T09:00:00.000Z' });

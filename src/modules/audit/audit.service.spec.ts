@@ -16,20 +16,21 @@ describe('AuditService', () => {
   });
 
   it('supports actor, entity and date filters', async () => {
-    const prisma = {
-      $transaction: jest.fn().mockResolvedValue([[], 0]),
-      auditLog: { findMany: jest.fn(), count: jest.fn() },
-    } as never;
+    const findMany = jest.fn().mockResolvedValue([]);
+    const count = jest.fn().mockResolvedValue(0);
+    const prisma = { $transaction: jest.fn().mockResolvedValue([[], 0]), auditLog: { findMany, count } } as never;
     const service = new AuditService(prisma);
 
     await service.list({ actorUserId: 'u1', entityType: 'Student', entityId: 's1', from: '2026-01-01', to: '2026-01-31' });
 
-    const transaction = (prisma as never as { $transaction: jest.Mock }).$transaction;
-    const where = transaction.mock.calls[0][0][0].where;
-    expect(where.actorUserId).toBe('u1');
-    expect(where.entityType).toBe('Student');
-    expect(where.entityId).toBe('s1');
-    expect(where.createdAt.gte).toEqual(new Date('2026-01-01'));
-    expect(where.createdAt.lte).toEqual(new Date('2026-01-31'));
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        actorUserId: 'u1', entityType: 'Student', entityId: 's1',
+        createdAt: { gte: new Date('2026-01-01'), lte: new Date('2026-01-31') },
+      }),
+    }));
+    expect(count).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ actorUserId: 'u1', entityType: 'Student', entityId: 's1' }),
+    }));
   });
 });

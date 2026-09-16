@@ -12,55 +12,18 @@ function makePrisma() {
     enrolment: { findFirst: jest.fn() },
     teacherAssignment: { findFirst: jest.fn() },
     assessmentResult: { findMany: jest.fn() },
+    attendanceRecord: { findMany: jest.fn().mockResolvedValue([]) },
   };
 }
 
 describe('AcademicReportsService', () => {
   it('derives a weighted term percentage without storing calculated grades', async () => {
     const prisma = makePrisma();
-    prisma.student.findUnique.mockResolvedValue({
-      id: 'student-1',
-      admissionNumber: 'BCI-001',
-      firstName: 'Ama',
-      lastName: 'Doe',
-      status: 'ACTIVE',
-    });
-    prisma.term.findUnique.mockResolvedValue({
-      id: 'term-1',
-      code: 'T1',
-      name: 'First Term',
-      startsAt: new Date('2026-09-01'),
-      endsAt: new Date('2026-12-20'),
-    });
+    prisma.student.findUnique.mockResolvedValue({ id: 'student-1', admissionNumber: 'BCI-001', firstName: 'Ama', lastName: 'Doe', status: 'ACTIVE' });
+    prisma.term.findUnique.mockResolvedValue({ id: 'term-1', code: 'T1', name: 'First Term', startsAt: new Date('2026-09-01'), endsAt: new Date('2026-12-20') });
     prisma.assessmentResult.findMany.mockResolvedValue([
-      {
-        id: 'result-1',
-        score: { toString: () => '80' },
-        remark: null,
-        enteredAt: new Date(),
-        assessment: {
-          id: 'assessment-1',
-          title: 'Test',
-          type: 'TEST',
-          maxScore: { toString: () => '100' },
-          weight: { toString: () => '40' },
-          subject: { code: 'MAT', name: 'Mathematics' },
-        },
-      },
-      {
-        id: 'result-2',
-        score: { toString: () => '45' },
-        remark: 'Good',
-        enteredAt: new Date(),
-        assessment: {
-          id: 'assessment-2',
-          title: 'Exam',
-          type: 'EXAM',
-          maxScore: { toString: () => '50' },
-          weight: { toString: () => '60' },
-          subject: { code: 'MAT', name: 'Mathematics' },
-        },
-      },
+      { id: 'result-1', score: { toString: () => '80' }, remark: null, enteredAt: new Date(), assessment: { id: 'assessment-1', title: 'Test', type: 'TEST', maxScore: { toString: () => '100' }, weight: { toString: () => '40' }, subject: { code: 'MAT', name: 'Mathematics' } } },
+      { id: 'result-2', score: { toString: () => '45' }, remark: 'Good', enteredAt: new Date(), assessment: { id: 'assessment-2', title: 'Exam', type: 'EXAM', maxScore: { toString: () => '50' }, weight: { toString: () => '60' }, subject: { code: 'MAT', name: 'Mathematics' } } },
     ]);
 
     const service = new AcademicReportsService(prisma as never);
@@ -80,9 +43,6 @@ describe('AcademicReportsService', () => {
     prisma.guardianStudent.findUnique.mockResolvedValue({ canViewAcademic: false });
 
     const service = new AcademicReportsService(prisma as never);
-
-    await expect(
-      service.getStudentTermSummary('student-1', 'term-1', 'guardian-user', [RoleName.GUARDIAN]),
-    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.getStudentTermSummary('student-1', 'term-1', 'guardian-user', [RoleName.GUARDIAN])).rejects.toBeInstanceOf(ForbiddenException);
   });
 });

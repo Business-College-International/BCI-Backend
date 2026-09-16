@@ -9,28 +9,12 @@ describe('GuardianIntegrityService', () => {
   });
 
   it('flags missing and duplicate primary guardians plus permission anomalies', async () => {
-    const prisma = {
-      guardianStudent: {
-        findMany: jest.fn().mockResolvedValue([
-          {
-            guardianId: 'g1', studentId: 's1', relationship: 'Mother', isPrimaryContact: false,
-            canViewAcademic: true, canPayFees: true, canManageWallet: true,
-          },
-          {
-            guardianId: 'g2', studentId: 's1', relationship: 'Father', isPrimaryContact: true,
-            canViewAcademic: true, canPayFees: false, canManageWallet: true,
-          },
-          {
-            guardianId: 'g3', studentId: 's2', relationship: 'Aunt', isPrimaryContact: true,
-            canViewAcademic: true, canPayFees: true, canManageWallet: false,
-          },
-          {
-            guardianId: 'g4', studentId: 's2', relationship: 'Uncle', isPrimaryContact: true,
-            canViewAcademic: false, canPayFees: false, canManageWallet: false,
-          },
-        ]),
-      },
-    };
+    const prisma = { guardianStudent: { findMany: jest.fn().mockResolvedValue([
+      { guardianId: 'g1', studentId: 's1', relationship: 'Mother', isPrimaryContact: false, canViewAcademic: true, canPayFees: true, canManageWallet: true },
+      { guardianId: 'g2', studentId: 's1', relationship: 'Father', isPrimaryContact: false, canViewAcademic: true, canPayFees: false, canManageWallet: true },
+      { guardianId: 'g3', studentId: 's2', relationship: 'Aunt', isPrimaryContact: true, canViewAcademic: true, canPayFees: true, canManageWallet: false },
+      { guardianId: 'g4', studentId: 's2', relationship: 'Uncle', isPrimaryContact: true, canViewAcademic: false, canPayFees: false, canManageWallet: false },
+    ]) } };
 
     const service = new GuardianIntegrityService(prisma as never);
     const result = await service.get(['DIRECTOR'] as any);
