@@ -7,10 +7,23 @@ import { FinanceExpenseController } from './finance-expense.controller';
 import { FinanceExpenseService } from './finance-expense.service';
 import { FinanceReceivablesController } from './finance-receivables.controller';
 import { FinanceReceivablesService } from './finance-receivables.service';
+import { PaymentPreflightController } from './payment-preflight.controller';
+import { PaymentPreflightService } from './payment-preflight.service';
 
 @Module({
   imports: [AuthModule],
-  controllers: [FinanceController, FinanceExpenseController, FinanceReceivablesController],
-  providers: [FinanceService, FinanceExpenseService, FinanceReceivablesService, PrismaService],
+  controllers: [
+    FinanceController,
+    FinanceExpenseController,
+    FinanceReceivablesController,
+    PaymentPreflightController,
+  ],
+  providers: [
+    FinanceService,
+    FinanceExpenseService,
+    FinanceReceivablesService,
+    PaymentPreflightService,
+    PrismaService,
+  ],
 })
 export class FinanceModule {}
