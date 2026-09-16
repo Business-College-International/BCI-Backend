@@ -11,13 +11,17 @@ import { CreateTermDto } from './dto/create-term.dto';
 import { TransitionTermDto } from './dto/transition-term.dto';
 import { UpdateClassDto } from './dto/update-class.dto';
 import { AcademicsService } from './academics.service';
+import { TermLifecycleService } from './term-lifecycle.service';
 
 type AuthenticatedRequest = Request & { user: { id: string; roles: RoleName[] } };
 
 @Controller()
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 export class AcademicsController {
-  constructor(private readonly academics: AcademicsService) {}
+  constructor(
+    private readonly academics: AcademicsService,
+    private readonly termLifecycle: TermLifecycleService,
+  ) {}
 
   @RequirePermissions(PERMISSIONS.ACADEMICS_READ)
   @Get('academic-years')
@@ -38,13 +42,13 @@ export class AcademicsController {
   @RequirePermissions(PERMISSIONS.ACADEMICS_MANAGE)
   @Post('academic-years/:id/terms')
   createTerm(@Param('id') id: string, @Body() dto: CreateTermDto, @Req() request: AuthenticatedRequest) {
-    return this.academics.createTerm(id, dto, request.user.id);
+    return this.termLifecycle.createTerm(id, dto, request.user.id);
   }
 
   @RequirePermissions(PERMISSIONS.ACADEMICS_MANAGE)
   @Patch('terms/:id/status')
   transitionTerm(@Param('id') id: string, @Body() dto: TransitionTermDto, @Req() request: AuthenticatedRequest) {
-    return this.academics.transitionTerm(id, dto.status, request.user.id);
+    return this.termLifecycle.transitionTerm(id, dto.status, request.user.id);
   }
 
   @RequirePermissions(PERMISSIONS.ACADEMICS_READ)
