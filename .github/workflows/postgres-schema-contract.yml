@@ -78,7 +78,7 @@ jobs:
           DATABASE_URL: postgresql://bci:bci@localhost:5432/bci_schema_contract?schema=public
         run: |
           npx prisma migrate diff \
-            --from-schema-datasource prisma/schema.prisma \
+            --from-schema-datamodel prisma/schema.prisma \
             --to-url "$DATABASE_URL" \
             --exit-code
 
