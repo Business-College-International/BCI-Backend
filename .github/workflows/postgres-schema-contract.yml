@@ -1,0 +1,100 @@
+name: PostgreSQL Schema Contract
+
+on:
+  pull_request:
+    paths:
+      - 'prisma/schema.prisma'
+      - 'prisma/seed.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'prisma/**'
+      - '.github/workflows/postgres-schema-contract.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: postgres-schema-contract-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify Prisma schema against clean PostgreSQL
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: bci
+          POSTGRES_PASSWORD: bci
+          POSTGRES_DB: bci_schema_contract
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U bci -d bci_schema_contract"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate Prisma schema
+        env:
+          DATABASE_URL: postgresql://bci:bci@localhost:5432/bci_schema_contract?schema=public
+        run: npx prisma validate
+
+      - name: Generate Prisma client
+        env:
+          DATABASE_URL: postgresql://bci:bci@localhost:5432/bci_schema_contract?schema=public
+        run: npx prisma generate
+
+      - name: Generate schema SQL
+        env:
+          DATABASE_URL: postgresql://bci:bci@localhost:5432/bci_schema_contract?schema=public
+        run: |
+          mkdir -p artifacts
+          npx prisma migrate diff \
+            --from-empty \
+            --to-schema-datamodel prisma/schema.prisma \
+            --script > artifacts/schema.sql
+
+      - name: Apply generated SQL to clean database
+        env:
+          PGPASSWORD: bci
+        run: psql -h localhost -U bci -d bci_schema_contract -v ON_ERROR_STOP=1 -f artifacts/schema.sql
+
+      - name: Verify database matches schema
+        env:
+          DATABASE_URL: postgresql://bci:bci@localhost:5432/bci_schema_contract?schema=public
+        run: |
+          npx prisma migrate diff \
+            --from-schema-datasource prisma/schema.prisma \
+            --to-url "$DATABASE_URL" \
+            --exit-code
+
+      - name: Build backend
+        env:
+          DATABASE_URL: postgresql://bci:bci@localhost:5432/bci_schema_contract?schema=public
+        run: npm run build
+
+      - name: Run tests
+        env:
+          DATABASE_URL: postgresql://bci:bci@localhost:5432/bci_schema_contract?schema=public
+        run: npm test -- --runInBand
+
+      - name: Upload generated schema SQL
+        uses: actions/upload-artifact@v4
+        with:
+          name: bci-schema-contract-sql
+          path: artifacts/schema.sql
+          retention-days: 3
