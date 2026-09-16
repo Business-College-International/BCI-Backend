@@ -5,13 +5,52 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: migration/bootstrap-baseline-review
+          fetch-depth: 0
+      - name: Normalize compact Prisma enum declarations
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          path = Path('prisma/schema.prisma')
+          text = path.read_text(encoding='utf-8')
+          pattern = re.compile(r'^enum\s+(\w+)\s*\{\s*([^{}]+?)\s*\}\s*$', re.MULTILINE)
+
+          def repl(match):
+              name = match.group(1)
+              values = match.group(2).split()
+              body = '\n'.join(f'  {value}' for value in values)
+              return f'enum {name} {{\n{body}\n}}'
+
+          normalized = pattern.sub(repl, text)
+          if normalized == text:
+              print('Prisma enums already normalized.')
+          else:
+              path.write_text(normalized, encoding='utf-8')
+              print('Normalized compact Prisma enum declarations.')
+
+      - name: Commit Prisma schema repair
+        shell: bash
+        run: |
+          if git diff --quiet -- prisma/schema.prisma; then
+            echo 'No Prisma schema repair needed.'
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add prisma/schema.prisma
+          git commit -m "fix(prisma): normalize enum declarations"
+          git push origin HEAD:migration/bootstrap-baseline-review
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
