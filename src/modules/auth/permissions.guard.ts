@@ -37,7 +37,12 @@ export class PermissionsGuard implements CanActivate {
         select: { role: true },
       }),
       this.prisma.userPermission.findMany({
-        where: { userId, permissionCode: { in: required } },
+        where: {
+          userId,
+          permissionCode: { in: required },
+          scopeType: null,
+          scopeId: null,
+        },
         select: { permissionCode: true },
       }),
     ]);
