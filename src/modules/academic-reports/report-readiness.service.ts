@@ -44,9 +44,11 @@ export class ReportReadinessService {
 
     const baseReasons: ReadinessReason[] = [];
     if (term.status !== TermStatus.CLOSED) baseReasons.push('TERM_NOT_CLOSED');
+    if (enrolments.length === 0) baseReasons.push('NO_ACTIVE_ENROLMENT');
     if (assessments.length === 0) baseReasons.push('NO_ASSESSMENTS');
     if (weightedCount > 0 && unweightedCount > 0) baseReasons.push('MIXED_WEIGHT_POLICY');
     baseReasons.push('GRADING_POLICY_REQUIRED');
+    const classReasons = Array.from(new Set(baseReasons));
 
     const students = enrolments.map((enrolment) => {
       const missingAssessments = assessments.filter((assessment) => !resultKeys.has(`${enrolment.studentId}:${assessment.id}`)).map((assessment) => ({
@@ -69,6 +71,10 @@ export class ReportReadinessService {
     return {
       class: schoolClass,
       term,
+      classReadiness: {
+        ready: classReasons.length === 0 && students.every((student) => student.ready),
+        reasons: classReasons,
+      },
       policy: {
         gradingConfigured: false,
         reason: 'Persistent school grading-band policy is not yet configured.',
