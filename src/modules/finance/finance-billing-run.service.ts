@@ -26,12 +26,14 @@ export class FinanceBillingRunService {
 
   async preview(dto: BillingRunDto, roles: RoleName[]) {
     this.requireRole(roles);
+    this.validateDueAt(dto.dueAt);
     const context = await this.loadContext(dto);
     return this.buildCandidates(context, dto.includeOptional ?? false);
   }
 
   async execute(dto: BillingRunDto, actorUserId: string, roles: RoleName[]) {
     this.requireRole(roles);
+    this.validateDueAt(dto.dueAt);
     const context = await this.loadContext(dto);
     const prepared = this.buildCandidates(context, dto.includeOptional ?? false);
     if (prepared.readyCount === 0) {
@@ -39,14 +41,11 @@ export class FinanceBillingRunService {
     }
 
     const dueAt = dto.dueAt ? new Date(dto.dueAt) : null;
-    if (dueAt && Number.isNaN(dueAt.getTime())) throw new BadRequestException('Invalid due date.');
-    if (dueAt && dueAt < new Date()) {
-      throw new BadRequestException('Due date cannot be earlier than the billing run execution time.');
-    }
 
     try {
       return await this.prisma.$transaction(async (tx) => {
         const invoices: Array<{ id: string; invoiceNumber: string; studentId: string; amount: string }> = [];
+        let concurrentSkipCount = 0;
         for (const candidate of prepared.candidates.filter((entry) => entry.status === 'READY')) {
           const existing = await tx.studentInvoice.findFirst({
             where: {
@@ -56,7 +55,10 @@ export class FinanceBillingRunService {
             },
             select: { id: true },
           });
-          if (existing) continue;
+          if (existing) {
+            concurrentSkipCount += 1;
+            continue;
+          }
 
           const schedules = await tx.feeSchedule.findMany({
             where: { id: { in: candidate.feeScheduleIds }, isActive: true },
@@ -119,11 +121,12 @@ export class FinanceBillingRunService {
               includeOptional: dto.includeOptional ?? false,
               candidateCount: prepared.candidates.length,
               issuedCount: invoices.length,
+              concurrentSkipCount,
             },
           },
         });
 
-        return { ...prepared, issuedCount: invoices.length, invoices };
+        return { ...prepared, issuedCount: invoices.length, concurrentSkipCount, invoices };
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     } catch (error) {
       if ((error as { code?: string }).code === 'P2034') {
@@ -187,6 +190,13 @@ export class FinanceBillingRunService {
       skippedCount: candidates.filter((candidate) => candidate.status === 'SKIP').length,
       estimatedInvoicedAmount: candidates.filter((candidate) => candidate.status === 'READY').reduce((sum, candidate) => sum.plus(candidate.estimatedAmount), new Prisma.Decimal(0)).toFixed(2),
     };
+  }
+
+  private validateDueAt(value?: string) {
+    if (!value) return;
+    const dueAt = new Date(value);
+    if (Number.isNaN(dueAt.getTime())) throw new BadRequestException('Invalid due date.');
+    if (dueAt < new Date()) throw new BadRequestException('Due date cannot be earlier than the billing run execution time.');
   }
 
   private nextInvoiceNumber() {
