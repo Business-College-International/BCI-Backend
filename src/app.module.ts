@@ -18,6 +18,7 @@ import { StaffModule } from './modules/staff/staff.module';
 import { StationeryModule } from './modules/stationery/stationery.module';
 import { StudentRecordsModule } from './modules/student-records/student-records.module';
 import { StudentsModule } from './modules/students/students.module';
+import { TimetableModule } from './modules/timetable/timetable.module';
 import { WalletModule } from './modules/wallet/wallet.module';
 
 @Controller('health')
@@ -48,6 +49,7 @@ class HealthController {
     StationeryModule,
     StudentRecordsModule,
     StudentsModule,
+    TimetableModule,
     FinanceModule,
     WalletModule,
   ],
