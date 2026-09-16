@@ -42,4 +42,35 @@ describe('rateLimitMiddleware', () => {
     expect(response.status).toHaveBeenCalledWith(429);
     expect(response.setHeader).toHaveBeenCalledWith('Retry-After', expect.any(String));
   });
+
+  it('limits public application tracking lookups', () => {
+    const request = makeRequest('/api/v1/applications/track/ABC123');
+    const response = makeResponse();
+    const next = jest.fn();
+
+    for (let i = 0; i < 10; i += 1) {
+      rateLimitMiddleware(request, response, next);
+    }
+    rateLimitMiddleware(request, response, next);
+
+    expect(next).toHaveBeenCalledTimes(10);
+    expect(response.status).toHaveBeenCalledWith(429);
+    expect(response.setHeader).toHaveBeenCalledWith('Retry-After', expect.any(String));
+  });
+
+  it('keeps different tracking paths in separate buckets', () => {
+    const firstRequest = makeRequest('/api/v1/applications/track/ABC123');
+    const secondRequest = makeRequest('/api/v1/applications/track/XYZ789');
+    const firstResponse = makeResponse();
+    const secondResponse = makeResponse();
+    const next = jest.fn();
+
+    for (let i = 0; i < 10; i += 1) {
+      rateLimitMiddleware(firstRequest, firstResponse, next);
+    }
+    rateLimitMiddleware(secondRequest, secondResponse, next);
+
+    expect(next).toHaveBeenCalledTimes(11);
+    expect(secondResponse.status).not.toHaveBeenCalledWith(429);
+  });
 });
