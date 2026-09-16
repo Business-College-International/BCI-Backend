@@ -1,5 +1,5 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { PaymentStatus, RoleName, Prisma } from '@prisma/client';
+import { PaymentStatus, PaymentPurpose, RoleName, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
 
 const PRIVILEGED_ROLES = new Set<RoleName>([
@@ -44,7 +44,7 @@ export class FinanceStatementService {
           term: { select: { id: true, code: true, name: true, startsAt: true, endsAt: true } },
           lines: { select: { id: true, description: true, amountDue: true } },
           allocations: {
-            where: { payment: { status: PaymentStatus.SUCCEEDED } },
+            where: { payment: { status: PaymentStatus.SUCCEEDED, purpose: PaymentPurpose.FEE } },
             select: {
               amount: true,
               payment: { select: { id: true, status: true, completedAt: true, receipt: true } },
@@ -54,10 +54,13 @@ export class FinanceStatementService {
         orderBy: { issuedAt: 'desc' },
       }),
       this.prisma.payment.findMany({
-        where: { studentId, status: PaymentStatus.SUCCEEDED },
+        where: { studentId, status: PaymentStatus.SUCCEEDED, purpose: PaymentPurpose.FEE },
         include: {
           receipt: true,
-          allocations: { include: { invoice: { select: { invoiceNumber: true } } } },
+          allocations: {
+            where: { invoice: { studentId } },
+            include: { invoice: { select: { invoiceNumber: true } } },
+          },
         },
         orderBy: { completedAt: 'desc' },
       }),
