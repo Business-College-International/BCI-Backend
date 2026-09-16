@@ -1,5 +1,7 @@
 import { Injectable, NotImplementedException } from '@nestjs/common';
+import { MoolreAdapter } from './moolre.adapter';
 import { PaymentProviderPort, ProviderWebhook, VerifiedProviderWebhook } from './payment-provider.port';
+import { NormalizedPaymentWebhook } from './payment-webhook.normalization';
 
 /**
  * Moolre-specific transport is intentionally disabled until the production
@@ -12,6 +14,10 @@ export class MoolreAdapter implements PaymentProviderPort {
 
   async verifyWebhook(_input: ProviderWebhook): Promise<VerifiedProviderWebhook> {
     throw new NotImplementedException('Moolre webhook verification is not enabled until the verified provider contract is configured.');
+  }
+
+  normalizeWebhook(_input: VerifiedProviderWebhook): NormalizedPaymentWebhook {
+    throw new NotImplementedException('Moolre webhook normalization is not enabled until the verified provider contract is configured.');
   }
 
   async initiatePayment(_input: {
