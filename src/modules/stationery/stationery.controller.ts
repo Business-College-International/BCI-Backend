@@ -12,6 +12,8 @@ import { CreateStationeryOrderDto } from './dto/create-stationery-order.dto';
 
 type AuthenticatedRequest = Request & { user: { id: string; roles: RoleName[] } };
 
+const PRIVILEGED_CATALOG_ROLES = new Set<RoleName>([RoleName.DIRECTOR, RoleName.PRINCIPAL, RoleName.OFFICE, RoleName.ACCOUNTANT]);
+
 @Controller('stationery')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 export class StationeryController {
@@ -19,7 +21,7 @@ export class StationeryController {
 
   @Get('catalog')
   listCatalog(@Query('includeInactive') includeInactive: string | undefined, @Req() request: AuthenticatedRequest) {
-    const privileged = request.user.roles.some((role) => [RoleName.DIRECTOR, RoleName.PRINCIPAL, RoleName.OFFICE, RoleName.ACCOUNTANT].includes(role));
+    const privileged = request.user.roles.some((role) => PRIVILEGED_CATALOG_ROLES.has(role));
     return this.stationery.listCatalog(includeInactive === 'true' && privileged);
   }
 
