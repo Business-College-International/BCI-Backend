@@ -14,13 +14,9 @@ export class ApplicationQueueService {
           terms: {
             where: { status: 'OPEN' },
             orderBy: { startsAt: 'asc' },
-            include: {
-              studentInvoices: false as never,
-            },
           },
           classes: {
             orderBy: [{ level: 'asc' }, { programme: 'asc' }, { name: 'asc' }],
-            include: { _count: { select: { enrolments: true } } },
           },
         },
       }),
@@ -33,25 +29,56 @@ export class ApplicationQueueService {
 
     const openTerms = academicYear?.terms ?? [];
     const classes = academicYear?.classes ?? [];
+    const occupancy = openTerms.length && classes.length
+      ? await this.prisma.enrolment.groupBy({
+          by: ['termId', 'classId'],
+          where: {
+            termId: { in: openTerms.map((term) => term.id) },
+            classId: { in: classes.map((schoolClass) => schoolClass.id) },
+            status: 'ACTIVE',
+          },
+          _count: { _all: true },
+        })
+      : [];
+
+    const occupancyMap = new Map(
+      occupancy.map((entry) => [`${entry.termId}:${entry.classId}`, entry._count._all]),
+    );
 
     return applications.map((application) => {
-      const matchingClasses = classes
-        .filter((schoolClass) => (
-          schoolClass.level === application.levelApplied &&
-          schoolClass.programme === application.programmeApplied &&
-          (schoolClass.capacity === null || schoolClass._count.enrolments < schoolClass.capacity)
-        ))
-        .map((schoolClass) => ({
-          id: schoolClass.id,
-          name: schoolClass.name,
-          level: schoolClass.level,
-          programme: schoolClass.programme,
-          division: schoolClass.division,
-          room: schoolClass.room,
-          capacity: schoolClass.capacity,
-          occupied: schoolClass._count.enrolments,
-          remaining: schoolClass.capacity === null ? null : schoolClass.capacity - schoolClass._count.enrolments,
-        }));
+      const placementOptions = openTerms.flatMap((term) =>
+        classes
+          .filter((schoolClass) => (
+            schoolClass.level === application.levelApplied &&
+            schoolClass.programme === application.programmeApplied
+          ))
+          .map((schoolClass) => {
+            const occupied = occupancyMap.get(`${term.id}:${schoolClass.id}`) ?? 0;
+            const remaining = schoolClass.capacity === null
+              ? null
+              : Math.max(schoolClass.capacity - occupied, 0);
+
+            return {
+              termId: term.id,
+              termCode: term.code,
+              termName: term.name,
+              termStartsAt: term.startsAt,
+              termEndsAt: term.endsAt,
+              classId: schoolClass.id,
+              className: schoolClass.name,
+              level: schoolClass.level,
+              programme: schoolClass.programme,
+              division: schoolClass.division,
+              room: schoolClass.room,
+              capacity: schoolClass.capacity,
+              occupied,
+              remaining,
+              available: schoolClass.capacity === null || occupied < schoolClass.capacity,
+            };
+          }),
+      );
+
+      const availablePlacements = placementOptions.filter((option) => option.available);
 
       return {
         id: application.id,
@@ -69,15 +96,10 @@ export class ApplicationQueueService {
         readiness: {
           currentAcademicYearId: academicYear?.id ?? null,
           currentAcademicYearName: academicYear?.name ?? null,
-          openTerms: openTerms.map((term) => ({
-            id: term.id,
-            code: term.code,
-            name: term.name,
-            startsAt: term.startsAt,
-            endsAt: term.endsAt,
-          })),
-          matchingClasses,
-          readyForPlacement: openTerms.length > 0 && matchingClasses.length > 0,
+          openTermCount: openTerms.length,
+          placementOptions,
+          availablePlacementCount: availablePlacements.length,
+          readyForPlacement: availablePlacements.length > 0,
         },
       };
     });
