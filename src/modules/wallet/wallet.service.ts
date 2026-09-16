@@ -1,5 +1,5 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { RoleName } from '@prisma/client';
+import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma, RoleName, WalletTransactionType } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
 
 const PRIVILEGED_WALLET_ROLES = new Set<RoleName>([
@@ -44,17 +44,49 @@ export class WalletService {
         exists: false,
         currency: 'GHS',
         balance: null,
-        balanceStatus: 'LEDGER_POLICY_REQUIRED',
+        balanceStatus: 'NO_WALLET',
         transactions: [],
       };
+    }
+
+    const hasUnsupportedReversal = await this.prisma.walletTransaction.count({
+      where: { walletId: studentId, type: WalletTransactionType.REVERSAL },
+    });
+    if (hasUnsupportedReversal > 0) {
+      return {
+        student,
+        exists: true,
+        currency: wallet.currency,
+        balance: null,
+        balanceStatus: 'LEDGER_POLICY_REQUIRED',
+        transactions: wallet.transactions.map((transaction) => ({
+          id: transaction.id,
+          type: transaction.type,
+          amount: transaction.amount.toString(),
+          providerReference: transaction.providerReference,
+          processedBy: transaction.processedBy,
+          createdAt: transaction.createdAt,
+          note: transaction.note,
+        })),
+      };
+    }
+
+    const balance = wallet.transactions.reduce((running, transaction) => {
+      if (transaction.type === WalletTransactionType.TOP_UP) return running.plus(transaction.amount);
+      if (transaction.type === WalletTransactionType.WITHDRAWAL) return running.minus(transaction.amount);
+      return running;
+    }, new Prisma.Decimal(0));
+
+    if (balance.lt(0)) {
+      throw new ConflictException('Wallet ledger has a negative balance and requires reconciliation.');
     }
 
     return {
       student,
       exists: true,
       currency: wallet.currency,
-      balance: null,
-      balanceStatus: 'LEDGER_POLICY_REQUIRED',
+      balance: balance.toFixed(2),
+      balanceStatus: 'CALCULATED',
       transactions: wallet.transactions.map((transaction) => ({
         id: transaction.id,
         type: transaction.type,
