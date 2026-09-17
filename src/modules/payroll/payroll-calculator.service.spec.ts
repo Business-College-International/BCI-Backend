@@ -13,6 +13,7 @@ function makeTx() {
     },
     payrollEntry: {
       upsert: jest.fn(),
+      findMany: jest.fn(),
       updateMany: jest.fn(),
     },
     auditLog: {
@@ -29,13 +30,15 @@ function makePrisma(tx: ReturnType<typeof makeTx>) {
 
 const managerRoles = [RoleName.ACCOUNTANT];
 
-function makePeriod() {
+function makePeriod(status = PayrollPeriodStatus.DRAFT) {
   return {
     id: 'period-1',
     code: '2026-09',
     startsAt: new Date('2026-09-01T00:00:00Z'),
     endsAt: new Date('2026-09-30T23:59:59Z'),
-    status: PayrollPeriodStatus.DRAFT,
+    status,
+    approvedBy: null,
+    approvedAt: null,
   };
 }
 
@@ -99,5 +102,80 @@ describe('PayrollCalculatorService salary-period integrity', () => {
     expect(result).toEqual({ periodId: 'period-1', status: PayrollPeriodStatus.CALCULATED, staffCount: 1 });
     expect(tx.payrollEntry.upsert).toHaveBeenCalledTimes(1);
     expect(tx.payrollPeriod.update).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('PayrollCalculatorService approval integrity', () => {
+  function makeApprovedPeriod() {
+    return makePeriod(PayrollPeriodStatus.CALCULATED);
+  }
+
+  function makeEntry(overrides: Partial<{
+    grossPay: string;
+    totalDeductions: string;
+    netPay: string;
+    status: string;
+    employmentStatus: string;
+  }> = {}) {
+    const grossPay = new Prisma.Decimal(overrides.grossPay ?? '6000.00');
+    const totalDeductions = new Prisma.Decimal(overrides.totalDeductions ?? '500.00');
+    const netPay = new Prisma.Decimal(overrides.netPay ?? '5500.00');
+    return {
+      id: 'entry-1',
+      grossPay,
+      totalDeductions,
+      netPay,
+      status: overrides.status ?? 'calculated',
+      staff: {
+        staffIdNo: 'STAFF-001',
+        employmentStatus: overrides.employmentStatus ?? 'active',
+      },
+    };
+  }
+
+  it('approves a consistent calculated payroll period', async () => {
+    const tx = makeTx();
+    tx.payrollPeriod.findUnique.mockResolvedValue(makeApprovedPeriod());
+    tx.payrollEntry.findMany.mockResolvedValue([makeEntry()]);
+    tx.payrollPeriod.update.mockResolvedValue({
+      status: PayrollPeriodStatus.APPROVED,
+      approvedAt: new Date('2026-09-17T15:20:00Z'),
+    });
+
+    const service = new PayrollCalculatorService(makePrisma(tx));
+    const result = await service.approve('period-1', 'approver-user', managerRoles);
+
+    expect(result.status).toBe(PayrollPeriodStatus.APPROVED);
+    expect(tx.payrollPeriod.update).toHaveBeenCalledTimes(1);
+    expect(tx.payrollEntry.updateMany).toHaveBeenCalledWith({
+      where: { periodId: 'period-1' },
+      data: { status: 'approved' },
+    });
+  });
+
+  it('blocks approval when net pay does not equal gross pay minus deductions', async () => {
+    const tx = makeTx();
+    tx.payrollPeriod.findUnique.mockResolvedValue(makeApprovedPeriod());
+    tx.payrollEntry.findMany.mockResolvedValue([makeEntry({ netPay: '5400.00' })]);
+
+    const service = new PayrollCalculatorService(makePrisma(tx));
+
+    await expect(service.approve('period-1', 'approver-user', managerRoles))
+      .rejects.toBeInstanceOf(BadRequestException);
+    expect(tx.payrollPeriod.update).not.toHaveBeenCalled();
+    expect(tx.payrollEntry.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('blocks approval when a payroll entry belongs to inactive staff', async () => {
+    const tx = makeTx();
+    tx.payrollPeriod.findUnique.mockResolvedValue(makeApprovedPeriod());
+    tx.payrollEntry.findMany.mockResolvedValue([makeEntry({ employmentStatus: 'inactive' })]);
+
+    const service = new PayrollCalculatorService(makePrisma(tx));
+
+    await expect(service.approve('period-1', 'approver-user', managerRoles))
+      .rejects.toBeInstanceOf(BadRequestException);
+    expect(tx.payrollPeriod.update).not.toHaveBeenCalled();
+    expect(tx.payrollEntry.updateMany).not.toHaveBeenCalled();
   });
 });
