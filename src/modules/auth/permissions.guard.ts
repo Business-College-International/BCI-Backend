@@ -43,9 +43,16 @@ export class PermissionsGuard implements CanActivate {
           scopeType: null,
           scopeId: null,
         },
-        select: { permissionCode: true },
+        select: { permissionCode: true, scopeType: true, scopeId: true },
       }),
     ]);
+
+    // Defense in depth: the query scopes to global grants, but re-verify in
+    // memory so a scoped grant can never be treated as a global permission
+    // even if the underlying read was not filtered as expected.
+    const globalDirectPermissions = directPermissions.filter(
+      (permission) => permission.scopeType == null && permission.scopeId == null,
+    );
 
     const roleNames = userRoles.map(({ role }) => role);
     const rolePermissions = await this.prisma.rolePermission.findMany({
@@ -54,7 +61,7 @@ export class PermissionsGuard implements CanActivate {
     });
 
     const granted = new Set([
-      ...directPermissions.map(({ permissionCode }) => permissionCode),
+      ...globalDirectPermissions.map(({ permissionCode }) => permissionCode),
       ...rolePermissions.map(({ permissionCode }) => permissionCode),
     ]);
 

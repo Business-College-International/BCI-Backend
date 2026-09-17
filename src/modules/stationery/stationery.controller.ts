@@ -19,7 +19,7 @@ export class StationeryController {
 
   @Get('catalog')
   listCatalog(@Query('includeInactive') includeInactive: string | undefined, @Req() request: AuthenticatedRequest) {
-    const privileged = request.user.roles.some((role) => [RoleName.DIRECTOR, RoleName.PRINCIPAL, RoleName.OFFICE, RoleName.ACCOUNTANT].includes(role));
+    const privileged = request.user.roles.some((role) => ([RoleName.DIRECTOR, RoleName.PRINCIPAL, RoleName.OFFICE, RoleName.ACCOUNTANT] as RoleName[]).includes(role));
     return this.stationery.listCatalog(includeInactive === 'true' && privileged);
   }
 

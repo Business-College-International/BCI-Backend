@@ -51,6 +51,7 @@ describe('ConfigurationService', () => {
     };
     const prisma = {
       feeSchedule: { findUnique: jest.fn().mockResolvedValue({ id: 'fee-1', termId: 'term-1', itemName: 'Tuition', amount: new Prisma.Decimal('1200.00'), isOptional: false, isActive: true, charges: [{ id: 'line-1' }] }) },
+      term: { findUnique: jest.fn().mockResolvedValue({ status: 'OPEN' }) },
       $transaction: async (callback: (client: any) => unknown) => callback(tx),
     };
     const service = new ConfigurationService(prisma as never);

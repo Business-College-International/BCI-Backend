@@ -3,7 +3,7 @@ import { ApplicationStatus } from '@prisma/client';
 
 export class ReviewApplicationDto {
   @IsEnum(ApplicationStatus)
-  status!: ApplicationStatus.UNDER_REVIEW | ApplicationStatus.REJECTED;
+  status!: 'UNDER_REVIEW' | 'REJECTED';
 
   @IsOptional()
   @IsString()

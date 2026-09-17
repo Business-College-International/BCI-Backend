@@ -17,7 +17,7 @@ describe('GuardianIntegrityService', () => {
             canViewAcademic: true, canPayFees: true, canManageWallet: true,
           },
           {
-            guardianId: 'g2', studentId: 's1', relationship: 'Father', isPrimaryContact: true,
+            guardianId: 'g2', studentId: 's1', relationship: 'Father', isPrimaryContact: false,
             canViewAcademic: true, canPayFees: false, canManageWallet: true,
           },
           {

@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { AttendanceStatus, RoleName } from '@prisma/client';
+import { AttendanceStatus, Prisma, RoleName } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
 import { CreateAttendanceSessionDto } from './dto/create-attendance-session.dto';
 import { MarkAttendanceDto } from './dto/mark-attendance.dto';
@@ -275,7 +275,7 @@ export class AttendanceService {
   }
 
   private async assertSessionAccess(
-    tx: PrismaService,
+    tx: Prisma.TransactionClient,
     classId: string,
     termId: string,
     subjectId: string | null,

@@ -21,7 +21,7 @@ const STAFF_FULFILLABLE_STATUSES = new Set(['PAID']);
 export class StationeryOperationsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async listOrders(actorUserId: string, roles: RoleName[], status?: string) {
+  async listOrders(_actorUserId: string, roles: RoleName[], status?: string) {
     this.assertManagement(roles);
     return this.prisma.stationeryOrder.findMany({
       where: status ? { status } : undefined,

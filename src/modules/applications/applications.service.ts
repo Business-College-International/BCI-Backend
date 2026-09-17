@@ -89,13 +89,13 @@ export class ApplicationsService {
 
   async review(
     id: string,
-    status: ApplicationStatus.UNDER_REVIEW | ApplicationStatus.REJECTED,
+    status: 'UNDER_REVIEW' | 'REJECTED',
     reason: string | undefined,
     actorUserId: string,
   ) {
     const current = await this.prisma.application.findUnique({ where: { id } });
     if (!current) throw new NotFoundException('Application not found');
-    if (![ApplicationStatus.PENDING, ApplicationStatus.UNDER_REVIEW].includes(current.status)) {
+    if (!([ApplicationStatus.PENDING, ApplicationStatus.UNDER_REVIEW] as ApplicationStatus[]).includes(current.status)) {
       throw new ConflictException('This application is already in a terminal state.');
     }
 

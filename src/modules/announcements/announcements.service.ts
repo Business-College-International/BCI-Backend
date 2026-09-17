@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { RoleName } from '@prisma/client';
+import { Prisma, RoleName } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
 import { CreateAnnouncementDto } from './dto/create-announcement.dto';
 
@@ -41,7 +41,7 @@ export class AnnouncementsService {
     const audienceTypes = ['ALL'] as string[];
     if (roles.includes(RoleName.GUARDIAN)) audienceTypes.push('GUARDIANS');
     if (roles.includes(RoleName.TEACHER)) audienceTypes.push('TEACHERS');
-    if (roles.some((role) => [RoleName.DIRECTOR, RoleName.PRINCIPAL, RoleName.OFFICE, RoleName.ACCOUNTANT, RoleName.SUPPORT_STAFF].includes(role))) audienceTypes.push('STAFF');
+    if (roles.some((role) => ([RoleName.DIRECTOR, RoleName.PRINCIPAL, RoleName.OFFICE, RoleName.ACCOUNTANT, RoleName.SUPPORT_STAFF] as RoleName[]).includes(role))) audienceTypes.push('STAFF');
 
     const [publishedAudience, publishedDirect, ownDrafts] = await Promise.all([
       this.prisma.announcement.findMany({ where: { publishedAt: { not: null }, audienceType: { in: audienceTypes } }, orderBy: { publishedAt: 'desc' }, take: 100 }),
@@ -56,7 +56,7 @@ export class AnnouncementsService {
     if (!roles.some((role) => MANAGE_ROLES.has(role))) throw new ForbiddenException('Announcement management access is restricted.');
   }
 
-  private async resolveRecipients(tx: PrismaService, audienceType: string, audienceRef: string | null) {
+  private async resolveRecipients(tx: Prisma.TransactionClient, audienceType: string, audienceRef: string | null) {
     if (audienceType === 'USER') {
       if (!audienceRef) throw new BadRequestException('USER announcements require a recipient user.');
       const user = await tx.user.findUnique({ where: { id: audienceRef }, select: { id: true } });

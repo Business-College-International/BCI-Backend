@@ -12,6 +12,7 @@ function makePrisma() {
     enrolment: { findFirst: jest.fn() },
     teacherAssignment: { findFirst: jest.fn() },
     assessmentResult: { findMany: jest.fn() },
+    attendanceRecord: { findMany: jest.fn().mockResolvedValue([]) },
   };
 }
 

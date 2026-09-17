@@ -298,7 +298,15 @@ export class FinanceService {
         PARTIALLY_PAID: 0,
         PAID: 0,
         VOID: 0,
-      } as Record<string, Prisma.Decimal | number>,
+      } as {
+        invoiced: Prisma.Decimal;
+        paidAllocated: Prisma.Decimal;
+        outstanding: Prisma.Decimal;
+        OPEN: number;
+        PARTIALLY_PAID: number;
+        PAID: number;
+        VOID: number;
+      },
     );
 
     const payments = await this.prisma.payment.findMany({

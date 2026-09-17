@@ -61,7 +61,7 @@ export class StudentRecordsService {
       const document = await tx.studentDocument.findUnique({ where: { id: documentId } });
       if (!document) throw new NotFoundException('Student document not found.');
       await tx.studentDocument.delete({ where: { id: documentId } });
-      await tx.auditLog.create({ data: { actorUserId, action: 'DELETE', entityType: 'StudentDocument', entityId: document.id, beforeJson: { studentId: document.studentId, type: document.type, fileUrl: document.fileUrl } });
+      await tx.auditLog.create({ data: { actorUserId, action: 'DELETE', entityType: 'StudentDocument', entityId: document.id, beforeJson: { studentId: document.studentId, type: document.type, fileUrl: document.fileUrl } } });
       return { success: true };
     });
   }

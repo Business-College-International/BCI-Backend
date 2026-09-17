@@ -2,7 +2,7 @@ import { SubstitutionValidatorService } from './substitution-validator.service';
 
 describe('SubstitutionValidatorService', () => {
   const prisma = {
-    teacherAssignment: { findFirst: jest.fn() },
+    teacherAssignment: { findFirst: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
     staff: { findUnique: jest.fn(), findMany: jest.fn() },
   } as any;
   const service = new SubstitutionValidatorService(prisma);

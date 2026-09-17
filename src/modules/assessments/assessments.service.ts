@@ -251,7 +251,7 @@ export class AssessmentsService {
   }
 
   private async assertTeacherAssignment(
-    tx: PrismaService,
+    tx: Prisma.TransactionClient,
     actorUserId: string,
     roles: RoleName[],
     termId: string,
@@ -271,7 +271,7 @@ export class AssessmentsService {
   }
 
   private async assertTeacherAssignmentForClass(
-    tx: PrismaService,
+    tx: Prisma.TransactionClient,
     actorUserId: string,
     roles: RoleName[],
     termId: string,
@@ -292,7 +292,7 @@ export class AssessmentsService {
   }
 
   private async findEligibleStudents(
-    tx: PrismaService,
+    tx: Prisma.TransactionClient,
     studentIds: string[],
     termId: string,
     subjectId: string,

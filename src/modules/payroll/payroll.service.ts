@@ -1,5 +1,5 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { PayrollPeriodStatus, RoleName } from '@prisma/client';
+import { RoleName } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
 
 const PAYROLL_ROLES = new Set<RoleName>([

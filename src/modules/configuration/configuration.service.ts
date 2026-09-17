@@ -42,7 +42,7 @@ export class ConfigurationService {
     if (dto.level && dto.level !== before.level && before.assignments.length > 0) throw new ConflictException('A subject already used in teaching assignments cannot change level.');
     return this.prisma.$transaction(async (tx) => {
       const subject = await tx.subject.update({ where: { id }, data: { name: dto.name?.trim(), level: dto.level, isElective: dto.isElective, programme: dto.programme, isActive: dto.isActive } });
-      await tx.auditLog.create({ data: { actorUserId, action: 'UPDATE', entityType: 'Subject', entityId: id, beforeJson: { name: before.name, level: before.level, programme: before.programme, isElective: before.isElective, isActive: before.isActive }, afterJson: { name: subject.name, level: subject.level, programme: subject.programme, isElective: subject.isElective, isActive: subject.isActive } });
+      await tx.auditLog.create({ data: { actorUserId, action: 'UPDATE', entityType: 'Subject', entityId: id, beforeJson: { name: before.name, level: before.level, programme: before.programme, isElective: before.isElective, isActive: before.isActive }, afterJson: { name: subject.name, level: subject.level, programme: subject.programme, isElective: subject.isElective, isActive: subject.isActive } } });
       return subject;
     });
   }

@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
-import { InvoiceStatus, PaymentStatus, RoleName } from '@prisma/client';
+import { InvoiceStatus, PaymentStatus, Prisma, RoleName } from '@prisma/client';
 import { FinanceService } from './finance.service';
 
 function mockPrisma() {
@@ -105,10 +105,10 @@ describe('FinanceService', () => {
         issuedAt: new Date('2026-09-01T00:00:00.000Z'),
         dueAt: null,
         notes: null,
-        lines: [{ id: 'line-1', description: 'Tuition', amountDue: { toString: () => '100.00', toFixed: () => '100.00' } }],
+        lines: [{ id: 'line-1', description: 'Tuition', amountDue: new Prisma.Decimal('100.00') }],
         allocations: [
-          { amount: { toString: () => '40.00', toFixed: () => '40.00' }, payment: { status: PaymentStatus.SUCCEEDED } },
-          { amount: { toString: () => '60.00', toFixed: () => '60.00' }, payment: { status: PaymentStatus.FAILED } },
+          { amount: new Prisma.Decimal('40.00'), payment: { status: PaymentStatus.SUCCEEDED } },
+          { amount: new Prisma.Decimal('60.00'), payment: { status: PaymentStatus.FAILED } },
         ],
       },
     ]);

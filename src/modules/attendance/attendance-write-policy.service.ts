@@ -1,12 +1,10 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { PrismaService } from '../../prisma.service';
+import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class AttendanceWritePolicyService {
-  constructor(private readonly prisma: PrismaService) {}
-
   async assertSessionWritable(
-    tx: PrismaService,
+    tx: Prisma.TransactionClient,
     termId: string,
     publishedAt: Date | null,
   ) {

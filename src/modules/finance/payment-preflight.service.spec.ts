@@ -15,6 +15,9 @@ function makePrisma() {
 describe('PaymentPreflightService', () => {
   it('rejects duplicate invoice ids', async () => {
     const prisma = makePrisma();
+    prisma.guardian.findUnique.mockResolvedValue({ personId: 'guardian-1' });
+    prisma.guardianStudent.findUnique.mockResolvedValue({ canPayFees: true });
+    prisma.student.findUnique.mockResolvedValue({ id: 'student-1' });
     prisma.studentInvoice.findMany.mockResolvedValue([]);
     const service = new PaymentPreflightService(prisma as never);
 

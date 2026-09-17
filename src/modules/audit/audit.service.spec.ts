@@ -18,7 +18,10 @@ describe('AuditService', () => {
   it('supports actor, entity and date filters', async () => {
     const prisma = {
       $transaction: jest.fn().mockResolvedValue([[], 0]),
-      auditLog: { findMany: jest.fn(), count: jest.fn() },
+      auditLog: {
+        findMany: jest.fn().mockImplementation((args) => args),
+        count: jest.fn().mockImplementation((args) => args),
+      },
     } as never;
     const service = new AuditService(prisma);
 
