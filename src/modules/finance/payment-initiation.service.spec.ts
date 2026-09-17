@@ -43,24 +43,32 @@ function makeService() {
         clientReference: 'bci-client-ref',
       }),
       update: jest.fn().mockResolvedValue({}),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
     paymentAllocation: { create: jest.fn().mockResolvedValue({}) },
     paymentProviderAttempt: {
       create: jest.fn().mockResolvedValue({ id: 'attempt-1' }),
       update: jest.fn().mockResolvedValue({}),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
     auditLog: { create: jest.fn().mockResolvedValue({}) },
   };
 
   const completionTx = {
-    payment: { update: jest.fn().mockResolvedValue({
-      id: 'payment-1',
-      amount: new Prisma.Decimal('50.00'),
-      currency: 'GHS',
-      status: PaymentStatus.PROCESSING,
-      clientReference: 'bci-client-ref',
-    }) },
-    paymentProviderAttempt: { update: jest.fn().mockResolvedValue({}) },
+    payment: {
+      update: jest.fn().mockResolvedValue({
+        id: 'payment-1',
+        amount: new Prisma.Decimal('50.00'),
+        currency: 'GHS',
+        status: PaymentStatus.PROCESSING,
+        clientReference: 'bci-client-ref',
+      }),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
+    paymentProviderAttempt: {
+      update: jest.fn().mockResolvedValue({}),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
     idempotencyKey: { update: jest.fn().mockResolvedValue({}) },
   };
 
@@ -95,12 +103,35 @@ describe('PaymentInitiationService', () => {
     expect(result).toMatchObject({ paymentId: 'payment-1', status: PaymentStatus.PROCESSING, providerReference: 'moolre-ref-1' });
   });
 
-  it('rejects a provider initiation failure without throwing the raw provider error', async () => {
-    const { service, moolre } = makeService();
-    moolre.initiatePayment.mockRejectedValueOnce(new Error('provider unavailable'));
+  it('keeps a payment processing when provider initiation outcome is unknown', async () => {
+    const { service, moolre, prisma, completionTx } = makeService();
+    moolre.initiatePayment.mockRejectedValueOnce(new Error('provider timeout after request'));
 
     await expect(service.initiate('student-1', dto, 'guardian-user', [RoleName.GUARDIAN], 'idem-2'))
       .rejects.toBeInstanceOf(ServiceUnavailableException);
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(completionTx.payment.updateMany).toHaveBeenCalledWith({
+      where: { id: 'payment-1', status: PaymentStatus.PENDING },
+      data: {
+        status: PaymentStatus.PROCESSING,
+        provider: 'MOOLRE',
+        providerReference: null,
+        failureCode: 'PROVIDER_INITIATION_UNKNOWN',
+        failureMessage: 'Provider initiation outcome is unknown; awaiting webhook reconciliation.',
+        completedAt: null,
+      },
+    });
+    expect(completionTx.paymentProviderAttempt.updateMany).toHaveBeenCalledWith({
+      where: { id: 'attempt-1', status: PaymentStatus.PENDING },
+      data: {
+        status: PaymentStatus.PROCESSING,
+        providerReference: null,
+        failureCode: 'PROVIDER_INITIATION_UNKNOWN',
+        failureMessage: 'Provider initiation outcome is unknown; awaiting webhook reconciliation.',
+        resolvedAt: null,
+      },
+    });
   });
 
   it('does not mark the payment failed when the provider accepted but local state persistence failed', async () => {
