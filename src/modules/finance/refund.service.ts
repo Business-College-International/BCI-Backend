@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
-import { PaymentPurpose, PaymentStatus, Prisma, RoleName } from '@prisma/client';
+import { InvoiceStatus, PaymentPurpose, PaymentStatus, Prisma, RoleName } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
 import { MoolreDisbursementService } from '../payment-providers/moolre.disbursement.service';
 import { RequestRefundDto } from './dto/request-refund.dto';
@@ -124,16 +124,18 @@ export class RefundService {
   async executeRefund(refundId: string, actorUserId: string, roles: RoleName[]) {
     this.assertManage(roles);
 
-    const refund = await this.prisma.$transaction(async (tx) => {
-      const current = await tx.refund.findUnique({
-        where: { id: refundId },
-        include: { payment: { select: { id: true, status: true, amount: true, purpose: true, guardianId: true } } },
-      });
-      if (!current) throw new NotFoundException('Refund not found.');
-      if (current.status !== PaymentStatus.PENDING || !current.approvedBy) {
-        throw new ConflictException('Only an approved pending refund can be executed.');
-      }
+    const current = await this.prisma.refund.findUnique({
+      where: { id: refundId },
+      include: { payment: { select: { id: true, status: true, amount: true, purpose: true, guardianId: true } } },
+    });
+    if (!current) throw new NotFoundException('Refund not found.');
+    if (current.status !== PaymentStatus.PENDING || !current.approvedBy) {
+      throw new ConflictException('Only an approved pending refund can be executed.');
+    }
 
+    const recipient = await this.resolveRecipientPhone(current.payment.guardianId, current.payment.id);
+
+    const refund = await this.prisma.$transaction(async (tx) => {
       const transition = await tx.refund.updateMany({
         where: { id: refundId, status: PaymentStatus.PENDING, approvedBy: { not: null } },
         data: { status: PaymentStatus.PROCESSING },
@@ -142,37 +144,32 @@ export class RefundService {
       return current;
     });
 
-    const recipient = await this.resolveRecipientPhone(refund.payment.guardianId, refund.payment.id);
     const referenceId = refundReference(refund.id);
-
+    let result: Awaited<ReturnType<MoolreDisbursementService['initiateTransfer']>>;
     try {
-      const result = await this.disbursements.initiateTransfer({
+      result = await this.disbursements.initiateTransfer({
         referenceId,
         amountGhs: refund.amount.toFixed(2),
         recipientPhone: recipient,
         narration: `BCI refund ${refund.id}`,
       });
-
-      if (result.status === 'SUCCESSFUL') {
-        return this.settleSuccessfulRefund(refund.id, actorUserId, result.providerReference);
-      }
-
-      if (result.status === 'FAILED') {
-        return this.failRefund(refund.id, actorUserId, 'PROVIDER_REFUND_FAILED');
-      }
-
-      return this.prisma.refund.update({
-        where: { id: refund.id },
-        data: { providerReference: result.providerReference },
-      });
     } catch (error) {
-      await this.prisma.refund.updateMany({
-        where: { id: refund.id, status: PaymentStatus.PROCESSING },
-        data: { status: PaymentStatus.FAILED },
-      });
+      await this.failRefund(refund.id, actorUserId, 'PROVIDER_REFUND_FAILED');
       if (error instanceof ConflictException) throw error;
       throw new ServiceUnavailableException('Refund provider initiation failed; no refund was recorded as completed.');
     }
+
+    if (result.status === 'FAILED') {
+      return this.failRefund(refund.id, actorUserId, 'PROVIDER_REFUND_FAILED');
+    }
+    if (result.status === 'SUCCESSFUL') {
+      return this.settleSuccessfulRefund(refund.id, actorUserId, result.providerReference);
+    }
+
+    return this.prisma.refund.update({
+      where: { id: refund.id },
+      data: { providerReference: result.providerReference },
+    });
   }
 
   async reconcileRefund(refundId: string, actorUserId: string, roles: RoleName[]) {
@@ -269,13 +266,13 @@ export class RefundService {
           const allocation = refund.payment.allocations[0];
           const invoice = allocation.invoice;
           const invoiceSettled = await this.invoiceNetSettled(tx, invoice.id);
-          if (invoice.status !== 'VOID') {
+          if (invoice.status !== InvoiceStatus.VOID) {
             const due = invoice.lines.reduce((sum, line) => sum.plus(line.amountDue), new Prisma.Decimal(0));
             const nextStatus = invoiceSettled.gte(due)
-              ? 'PAID'
+              ? InvoiceStatus.PAID
               : invoiceSettled.gt(0)
-                ? 'PARTIALLY_PAID'
-                : 'OPEN';
+                ? InvoiceStatus.PARTIALLY_PAID
+                : InvoiceStatus.OPEN;
             await tx.studentInvoice.update({ where: { id: invoice.id }, data: { status: nextStatus } });
           }
         }
@@ -312,7 +309,7 @@ export class RefundService {
               status: PaymentStatus.SUCCEEDED,
               providerReference,
               amount: refund.amount.toFixed(2),
-              paymentStatus: totalRefunded.gte(refund.payment.amount) ? PaymentStatus.REFUNDED : refund.payment.status,
+              paymentStatus: totalRefunded.gte(refund.payment.amount) ? PaymentStatus.REFUNDED : PaymentStatus.SUCCEEDED,
             },
           },
         });
