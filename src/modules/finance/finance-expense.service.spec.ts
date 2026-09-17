@@ -6,7 +6,7 @@ import { FinanceExpenseService } from './finance-expense.service';
 function makeTx() {
   return {
     idempotencyKey: { upsert: jest.fn(), update: jest.fn() },
-    expense: { create: jest.fn(), findUnique: jest.fn(), update: jest.fn(), findMany: jest.fn() },
+    expense: { create: jest.fn(), findUnique: jest.fn(), update: jest.fn(), updateMany: jest.fn(), findMany: jest.fn() },
     auditLog: { create: jest.fn() },
   };
 }
@@ -85,6 +85,22 @@ describe('FinanceExpenseService', () => {
 
     await expect(service.decide('e1', 'APPROVED', 'approver', [RoleName.ACCOUNTANT]))
       .rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('blocks a concurrent expense decision when another decision already won', async () => {
+    const tx = makeTx();
+    tx.expense.findUnique.mockResolvedValue({ id: 'e1', enteredBy: 'owner', status: ExpenseStatus.SUBMITTED });
+    tx.expense.updateMany.mockResolvedValue({ count: 0 });
+    const prisma = { $transaction: jest.fn(async (callback: (value: typeof tx) => unknown) => callback(tx)) };
+    const service = new FinanceExpenseService(prisma as never);
+
+    await expect(service.decide('e1', 'APPROVED', 'approver', [RoleName.ACCOUNTANT]))
+      .rejects.toBeInstanceOf(ConflictException);
+    expect(tx.expense.updateMany).toHaveBeenCalledWith({
+      where: { id: 'e1', status: ExpenseStatus.SUBMITTED },
+      data: expect.objectContaining({ status: ExpenseStatus.APPROVED, approvedBy: 'approver' }),
+    });
+    expect(tx.auditLog.create).not.toHaveBeenCalled();
   });
 
   it('serializes expense decimals without losing monetary precision', async () => {
