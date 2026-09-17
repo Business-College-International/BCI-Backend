@@ -153,10 +153,24 @@ export class RefundService {
         recipientPhone: recipient,
         narration: `BCI refund ${refund.id}`,
       });
-    } catch (error) {
-      await this.failRefund(refund.id, actorUserId, 'PROVIDER_REFUND_FAILED');
-      if (error instanceof ConflictException) throw error;
-      throw new ServiceUnavailableException('Refund provider initiation failed; no refund was recorded as completed.');
+    } catch {
+      try {
+        const status = await this.disbursements.getTransferStatus(referenceId);
+        if (status.status === 'FAILED') {
+          return this.failRefund(refund.id, actorUserId, 'PROVIDER_REFUND_FAILED');
+        }
+        if (status.status === 'SUCCESSFUL') {
+          return this.settleSuccessfulRefund(refund.id, actorUserId, status.providerReference);
+        }
+
+        return this.prisma.refund.update({
+          where: { id: refund.id },
+          data: { providerReference: status.providerReference },
+        });
+      } catch (statusError) {
+        if (statusError instanceof ConflictException) throw statusError;
+        throw new ServiceUnavailableException('Refund provider initiation outcome is unknown; the refund remains processing and requires reconciliation.');
+      }
     }
 
     if (result.status === 'FAILED') {
