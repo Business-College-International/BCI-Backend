@@ -1,10 +1,10 @@
-import { BadRequestException } from '@nestjs/common';
-import { InvoiceStatus, RoleName } from '@prisma/client';
+import { BadRequestException, ConflictException } from '@nestjs/common';
+import { InvoiceStatus, Prisma, RoleName } from '@prisma/client';
 import { FinanceReceivablesService } from './finance-receivables.service';
 
 function makePrisma() {
   return {
-    studentInvoice: { findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
+    studentInvoice: { findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
     auditLog: { create: jest.fn() },
     $transaction: jest.fn(),
   };
@@ -25,7 +25,50 @@ describe('FinanceReceivablesService', () => {
     await expect(
       service.voidInvoice('invoice-1', { reason: 'Duplicate issuance' }, 'office-1', [RoleName.OFFICE]),
     ).rejects.toBeInstanceOf(BadRequestException);
-    expect(prisma.studentInvoice.update).not.toHaveBeenCalled();
+    expect(prisma.studentInvoice.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('uses a conditional serializable transition when voiding an unallocated invoice', async () => {
+    const prisma = makePrisma();
+    prisma.$transaction.mockImplementation(async (callback: (tx: typeof prisma) => unknown, options: unknown) => {
+      expect(options).toEqual(expect.objectContaining({ isolationLevel: Prisma.TransactionIsolationLevel.Serializable }));
+      return callback(prisma);
+    });
+    prisma.studentInvoice.findUnique.mockResolvedValue({
+      id: 'invoice-1',
+      status: InvoiceStatus.OPEN,
+      allocations: [],
+    });
+    prisma.studentInvoice.updateMany.mockResolvedValue({ count: 1 });
+
+    const service = new FinanceReceivablesService(prisma as never);
+    const result = await service.voidInvoice('invoice-1', { reason: 'Duplicate issuance' }, 'office-1', [RoleName.OFFICE]);
+
+    expect(result).toEqual({ success: true, invoiceId: 'invoice-1', status: InvoiceStatus.VOID });
+    expect(prisma.studentInvoice.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'invoice-1', status: InvoiceStatus.OPEN, allocations: { none: {} } },
+    }));
+  });
+
+  it('rejects a lost conditional void transition as a concurrency conflict', async () => {
+    const prisma = makePrisma();
+    prisma.$transaction.mockImplementation(async (callback: (tx: typeof prisma) => unknown) => callback(prisma));
+    prisma.studentInvoice.findUnique.mockResolvedValue({ id: 'invoice-1', status: InvoiceStatus.OPEN, allocations: [] });
+    prisma.studentInvoice.updateMany.mockResolvedValue({ count: 0 });
+
+    const service = new FinanceReceivablesService(prisma as never);
+    await expect(
+      service.voidInvoice('invoice-1', { reason: 'Duplicate issuance' }, 'office-1', [RoleName.OFFICE]),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('translates a serialization conflict into a retryable conflict response', async () => {
+    const prisma = makePrisma();
+    prisma.$transaction.mockRejectedValue({ code: 'P2034' });
+    const service = new FinanceReceivablesService(prisma as never);
+    await expect(
+      service.voidInvoice('invoice-1', { reason: 'Duplicate issuance' }, 'office-1', [RoleName.OFFICE]),
+    ).rejects.toBeInstanceOf(ConflictException);
   });
 
   it('builds ageing buckets from outstanding invoice balances', async () => {
