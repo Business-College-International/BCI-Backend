@@ -119,10 +119,24 @@ export class FinanceExpenseService {
       if (!expense) throw new NotFoundException('Expense not found.');
       if (expense.status !== ExpenseStatus.SUBMITTED) throw new BadRequestException('Only submitted expenses can be approved or rejected.');
       if (expense.enteredBy === actorUserId) throw new ForbiddenException('The submitter cannot approve or reject their own expense.');
-      const updated = await tx.expense.update({
-        where: { id },
-        data: { status: decision === 'APPROVED' ? ExpenseStatus.APPROVED : ExpenseStatus.REJECTED, approvedBy: actorUserId, approvedAt: new Date() },
+
+      const transition = await tx.expense.updateMany({
+        where: {
+          id,
+          status: ExpenseStatus.SUBMITTED,
+        },
+        data: {
+          status: decision === 'APPROVED' ? ExpenseStatus.APPROVED : ExpenseStatus.REJECTED,
+          approvedBy: actorUserId,
+          approvedAt: new Date(),
+        },
       });
+      if (transition.count !== 1) {
+        throw new ConflictException('Expense decision was already applied by another user.');
+      }
+
+      const updated = await tx.expense.findUnique({ where: { id } });
+      if (!updated) throw new NotFoundException('Expense disappeared during decision.');
       await this.audit(tx, actorUserId, id, decision, expense.status, updated.status);
       return this.view(updated);
     });
