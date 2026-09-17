@@ -47,7 +47,7 @@ describe('PaymentPreflightService', () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
-  it('builds oldest-due-first allocation from net balances and reports pending payments', async () => {
+  it('builds oldest-due-first allocation from settled balances and reports pending payments', async () => {
     const prisma = makePrisma();
     prisma.guardian.findUnique.mockResolvedValue({ personId: 'guardian-1' });
     prisma.guardianStudent.findUnique.mockResolvedValue({ canPayFees: true });
@@ -61,7 +61,7 @@ describe('PaymentPreflightService', () => {
         dueAt: new Date('2026-09-10T00:00:00Z'),
         issuedAt: new Date('2026-09-01T00:00:00Z'),
         lines: [{ amountDue: new Prisma.Decimal('500.00') }],
-        allocations: [{ amount: new Prisma.Decimal('200.00'), payment: { refunds: [{ amount: new Prisma.Decimal('100.00'), status: 'SUCCEEDED' }] } }],
+        allocations: [{ amount: new Prisma.Decimal('200.00'), payment: { status: 'SUCCEEDED', refunds: [{ amount: new Prisma.Decimal('100.00'), status: 'SUCCEEDED' }] } }],
         term: { id: 'term-1', code: 'T1', name: 'Term 1' },
       },
       {
@@ -100,5 +100,41 @@ describe('PaymentPreflightService', () => {
     ]);
     expect(result.pendingPayments.amount).toBe('100.00');
     expect(result.reservation.available).toBe(true);
+  });
+
+  it('does not subtract unsettled processing allocations from invoice availability', async () => {
+    const prisma = makePrisma();
+    prisma.guardian.findUnique.mockResolvedValue({ personId: 'guardian-1' });
+    prisma.guardianStudent.findUnique.mockResolvedValue({ canPayFees: true });
+    prisma.student.findUnique.mockResolvedValue({ id: 'student-1' });
+    prisma.studentInvoice.findMany.mockResolvedValue([
+      {
+        id: 'invoice-1',
+        invoiceNumber: 'BCI-1',
+        studentId: 'student-1',
+        termId: 'term-1',
+        dueAt: new Date('2026-09-10T00:00:00Z'),
+        issuedAt: new Date('2026-09-01T00:00:00Z'),
+        lines: [{ amountDue: new Prisma.Decimal('500.00') }],
+        allocations: [
+          { amount: new Prisma.Decimal('200.00'), payment: { status: 'PROCESSING', refunds: [] } },
+        ],
+        term: { id: 'term-1', code: 'T1', name: 'Term 1' },
+      },
+    ]);
+    prisma.payment.findMany.mockResolvedValue([]);
+
+    const service = new PaymentPreflightService(prisma as never);
+    const result = await service.preflight(
+      'student-1',
+      { invoiceIds: ['invoice-1'] },
+      'guardian-user',
+      ['GUARDIAN'] as never,
+    );
+
+    expect(result.selectedOutstandingAmount).toBe('500.00');
+    expect(result.allocations).toEqual([
+      { invoiceId: 'invoice-1', invoiceNumber: 'BCI-1', termId: 'term-1', amount: '500.00' },
+    ]);
   });
 });
