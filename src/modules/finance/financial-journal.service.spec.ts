@@ -30,6 +30,16 @@ describe('FinancialJournalService', () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
+  it('rejects journal lines with mixed currencies', async () => {
+    const prisma = makePrisma();
+    const service = new FinancialJournalService(prisma);
+    await expect(service.recordBalancedEntry([
+      { accountCode: 'CASH', direction: 'DEBIT', amount: '100.00', currency: 'GHS', referenceType: 'Payment', referenceId: 'p1' },
+      { accountCode: 'FEES', direction: 'CREDIT', amount: '100.00', currency: 'USD', referenceType: 'Payment', referenceId: 'p1' },
+    ])).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
   it('writes all balanced lines atomically', async () => {
     const create = jest.fn().mockImplementation(({ data }) => data);
     const tx = { financialJournalEntry: { create, findMany: jest.fn().mockResolvedValue([]) } };
