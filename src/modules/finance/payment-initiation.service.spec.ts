@@ -55,30 +55,30 @@ function makeService() {
   };
 
   const completionTx = {
-    payment: { update: jest.fn().mockResolvedValue({
-      id: 'payment-1',
-      amount: new Prisma.Decimal('50.00'),
-      currency: 'GHS',
-      status: PaymentStatus.PROCESSING,
-      clientReference: 'bci-client-ref',
-    }) },
-    paymentProviderAttempt: { update: jest.fn().mockResolvedValue({}) },
+    payment: {
+      update: jest.fn().mockResolvedValue({
+        id: 'payment-1',
+        amount: new Prisma.Decimal('50.00'),
+        currency: 'GHS',
+        status: PaymentStatus.PROCESSING,
+        clientReference: 'bci-client-ref',
+      }),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
+    paymentProviderAttempt: {
+      update: jest.fn().mockResolvedValue({}),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
     idempotencyKey: { update: jest.fn().mockResolvedValue({}) },
-  };
-
-  const uncertaintyTx = {
-    payment: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
-    paymentProviderAttempt: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
   };
 
   const prisma = {
     $transaction: jest.fn()
       .mockImplementationOnce(async (callback: (tx: any) => unknown) => callback(reservationTx))
-      .mockImplementationOnce(async (callback: (tx: any) => unknown) => callback(completionTx))
-      .mockImplementationOnce(async (callback: (tx: any) => unknown) => callback(uncertaintyTx)),
+      .mockImplementationOnce(async (callback: (tx: any) => unknown) => callback(completionTx)),
   };
 
-  return { service: new PaymentInitiationService(prisma as any, moolre as any), prisma, moolre, reservationTx, completionTx, uncertaintyTx };
+  return { service: new PaymentInitiationService(prisma as any, moolre as any), prisma, moolre, reservationTx, completionTx };
 }
 
 describe('PaymentInitiationService', () => {
@@ -104,14 +104,14 @@ describe('PaymentInitiationService', () => {
   });
 
   it('keeps a payment processing when provider initiation outcome is unknown', async () => {
-    const { service, moolre, prisma, uncertaintyTx } = makeService();
+    const { service, moolre, prisma, completionTx } = makeService();
     moolre.initiatePayment.mockRejectedValueOnce(new Error('provider timeout after request'));
 
     await expect(service.initiate('student-1', dto, 'guardian-user', [RoleName.GUARDIAN], 'idem-2'))
       .rejects.toBeInstanceOf(ServiceUnavailableException);
 
-    expect(prisma.$transaction).toHaveBeenCalledTimes(3);
-    expect(uncertaintyTx.payment.updateMany).toHaveBeenCalledWith({
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(completionTx.payment.updateMany).toHaveBeenCalledWith({
       where: { id: 'payment-1', status: PaymentStatus.PENDING },
       data: {
         status: PaymentStatus.PROCESSING,
@@ -122,7 +122,7 @@ describe('PaymentInitiationService', () => {
         completedAt: null,
       },
     });
-    expect(uncertaintyTx.paymentProviderAttempt.updateMany).toHaveBeenCalledWith({
+    expect(completionTx.paymentProviderAttempt.updateMany).toHaveBeenCalledWith({
       where: { id: 'attempt-1', status: PaymentStatus.PENDING },
       data: {
         status: PaymentStatus.PROCESSING,
