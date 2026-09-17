@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { PayrollPeriodStatus, Prisma, RoleName } from '@prisma/client';
 import { PayrollCalculatorService } from './payroll-calculator.service';
 
@@ -22,9 +22,15 @@ function makeTx() {
   };
 }
 
-function makePrisma(tx: ReturnType<typeof makeTx>) {
+function makePrisma(tx: ReturnType<typeof makeTx>, transactionError?: unknown) {
   return {
-    $transaction: jest.fn(async (callback: (value: typeof tx) => unknown) => callback(tx)),
+    $transaction: jest.fn(async (callback: (value: typeof tx) => unknown, options: unknown) => {
+      if (transactionError) throw transactionError;
+      expect(options).toEqual(expect.objectContaining({
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      }));
+      return callback(tx);
+    }),
   } as any;
 }
 
@@ -103,6 +109,13 @@ describe('PayrollCalculatorService salary-period integrity', () => {
     expect(tx.payrollEntry.upsert).toHaveBeenCalledTimes(1);
     expect(tx.payrollPeriod.update).toHaveBeenCalledTimes(1);
   });
+
+  it('turns a concurrent calculation into a retryable conflict', async () => {
+    const service = new PayrollCalculatorService(makePrisma(makeTx(), { code: 'P2034' }));
+
+    await expect(service.calculate('period-1', 'user-1', managerRoles))
+      .rejects.toEqual(expect.objectContaining({ message: 'Payroll period changed concurrently. Please retry the calculation.' }));
+  });
 });
 
 describe('PayrollCalculatorService approval integrity', () => {
@@ -177,5 +190,12 @@ describe('PayrollCalculatorService approval integrity', () => {
       .rejects.toBeInstanceOf(BadRequestException);
     expect(tx.payrollPeriod.update).not.toHaveBeenCalled();
     expect(tx.payrollEntry.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('turns a concurrent approval into a retryable conflict', async () => {
+    const service = new PayrollCalculatorService(makePrisma(makeTx(), { code: 'P2034' }));
+
+    await expect(service.approve('period-1', 'approver-user', managerRoles))
+      .rejects.toEqual(expect.objectContaining({ message: 'Payroll period changed concurrently. Please retry the approval.' }));
   });
 });
