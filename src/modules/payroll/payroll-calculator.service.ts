@@ -74,6 +74,46 @@ export class PayrollCalculatorService {
       if (period.status !== PayrollPeriodStatus.CALCULATED) throw new BadRequestException('Only calculated payroll periods can be approved.');
       if (period.approvedBy === actorUserId) throw new ForbiddenException('A payroll approver cannot reuse a previous approval identity.');
 
+      const entries = await tx.payrollEntry.findMany({
+        where: { periodId },
+        select: {
+          id: true,
+          grossPay: true,
+          totalDeductions: true,
+          netPay: true,
+          status: true,
+          staff: {
+            select: {
+              staffIdNo: true,
+              employmentStatus: true,
+            },
+          },
+        },
+        orderBy: { staffId: 'asc' },
+      });
+
+      if (entries.length === 0) {
+        throw new BadRequestException('Payroll period cannot be approved without payroll entries.');
+      }
+
+      const invalidEntry = entries.find((entry) => {
+        const gross = entry.grossPay;
+        const deductions = entry.totalDeductions;
+        const net = entry.netPay;
+        return entry.status !== 'calculated'
+          || entry.staff.employmentStatus !== 'active'
+          || gross.isNegative()
+          || deductions.isNegative()
+          || deductions.gt(gross)
+          || !gross.sub(deductions).eq(net);
+      });
+
+      if (invalidEntry) {
+        throw new BadRequestException(
+          `Payroll entry ${invalidEntry.staff.staffIdNo} failed approval integrity checks. Recalculate or correct the entry before approval.`,
+        );
+      }
+
       const updated = await tx.payrollPeriod.update({ where: { id: periodId }, data: { status: PayrollPeriodStatus.APPROVED, approvedBy: actorUserId, approvedAt: new Date() } });
       await tx.payrollEntry.updateMany({ where: { periodId }, data: { status: 'approved' } });
       await tx.auditLog.create({
