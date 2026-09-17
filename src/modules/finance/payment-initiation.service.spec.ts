@@ -106,7 +106,7 @@ describe('PaymentInitiationService', () => {
   it('does not mark the payment failed when the provider accepted but local state persistence failed', async () => {
     const { service, prisma, moolre, reservationTx } = makeService();
     const persistenceError = new Error('database unavailable');
-    prisma.$transaction
+    prisma.$transaction.mockReset()
       .mockImplementationOnce(async (callback: (tx: any) => unknown) => callback(reservationTx))
       .mockRejectedValueOnce(persistenceError);
 
