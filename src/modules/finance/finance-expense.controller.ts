@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { ExpenseStatus, RoleName } from '@prisma/client';
 import { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -23,8 +23,8 @@ export class FinanceExpenseController {
 
   @Post()
   @RequirePermissions(PERMISSIONS.FINANCE_MANAGE)
-  create(@Body() dto: CreateExpenseDto, @Req() request: AuthenticatedRequest) {
-    return this.expenses.create(dto, request.user.id, request.user.roles);
+  create(@Body() dto: CreateExpenseDto, @Headers('Idempotency-Key') idempotencyKey: string, @Req() request: AuthenticatedRequest) {
+    return this.expenses.create(dto, request.user.id, request.user.roles, idempotencyKey);
   }
 
   @Post(':id/submit')

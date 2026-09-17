@@ -1,5 +1,6 @@
-import { ForbiddenException, Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { ExpenseStatus, Prisma, RoleName } from '@prisma/client';
+import { createHash } from 'node:crypto';
 import { PrismaService } from '../../prisma.service';
 import { CreateExpenseDto } from './dto/create-expense.dto';
 
@@ -10,30 +11,92 @@ const APPROVER_ROLES = new Set<RoleName>([RoleName.DIRECTOR, RoleName.PRINCIPAL,
 export class FinanceExpenseService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(dto: CreateExpenseDto, actorUserId: string, roles: RoleName[]) {
+  async create(dto: CreateExpenseDto, actorUserId: string, roles: RoleName[], idempotencyKey: string) {
     this.requireRole(roles, ENTRY_ROLES);
-    return this.prisma.$transaction(async (tx) => {
-      const expense = await tx.expense.create({
-        data: {
-          category: dto.category.trim(),
-          amount: new Prisma.Decimal(dto.amount),
-          description: dto.description?.trim(),
-          receiptUrl: dto.receiptUrl?.trim(),
-          enteredBy: actorUserId,
-          status: ExpenseStatus.DRAFT,
-        },
-      });
-      await tx.auditLog.create({
-        data: {
-          actorUserId,
-          action: 'CREATE',
-          entityType: 'Expense',
-          entityId: expense.id,
-          afterJson: { category: expense.category, amount: expense.amount.toString(), status: expense.status },
-        },
-      });
-      return this.view(expense);
-    });
+    const normalizedKey = idempotencyKey?.trim();
+    if (!normalizedKey) throw new ConflictException('An Idempotency-Key header is required for expense creation.');
+
+    const normalizedRequest = {
+      category: dto.category.trim(),
+      amount: new Prisma.Decimal(dto.amount).toFixed(2),
+      description: dto.description?.trim() || null,
+      receiptUrl: dto.receiptUrl?.trim() || null,
+    };
+    const requestHash = createHash('sha256').update(JSON.stringify(normalizedRequest)).digest('hex');
+
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const keyRecord = await tx.idempotencyKey.upsert({
+          where: {
+            userId_key_operation: {
+              userId: actorUserId,
+              key: normalizedKey,
+              operation: 'finance.expense.create',
+            },
+          },
+          create: {
+            userId: actorUserId,
+            key: normalizedKey,
+            operation: 'finance.expense.create',
+            requestHash,
+          },
+          update: {},
+        });
+
+        if (keyRecord.requestHash !== requestHash) {
+          throw new ConflictException('The expense Idempotency-Key was already used with different parameters.');
+        }
+        if (keyRecord.responseJson) {
+          return keyRecord.responseJson as Prisma.JsonObject;
+        }
+        if (keyRecord.statusCode) {
+          throw new ConflictException('An identical expense submission is already in progress.');
+        }
+
+        const expense = await tx.expense.create({
+          data: {
+            category: normalizedRequest.category,
+            amount: new Prisma.Decimal(normalizedRequest.amount),
+            description: normalizedRequest.description ?? undefined,
+            receiptUrl: normalizedRequest.receiptUrl ?? undefined,
+            enteredBy: actorUserId,
+            status: ExpenseStatus.DRAFT,
+          },
+        });
+        await tx.auditLog.create({
+          data: {
+            actorUserId,
+            action: 'CREATE',
+            entityType: 'Expense',
+            entityId: expense.id,
+            afterJson: { category: expense.category, amount: expense.amount.toString(), status: expense.status },
+          },
+        });
+
+        const response = JSON.parse(JSON.stringify(this.view(expense)));
+        await tx.idempotencyKey.update({
+          where: {
+            userId_key_operation: {
+              userId: actorUserId,
+              key: normalizedKey,
+              operation: 'finance.expense.create',
+            },
+          },
+          data: {
+            responseJson: response,
+            statusCode: 201,
+            completedAt: new Date(),
+          },
+        });
+
+        return response;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 5000, timeout: 10000 });
+    } catch (error) {
+      if ((error as { code?: string }).code === 'P2034') {
+        throw new ConflictException('Expense creation conflicted with another financial operation. Please retry.');
+      }
+      throw error;
+    }
   }
 
   async submit(id: string, actorUserId: string, roles: RoleName[]) {
