@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { PaymentStatus } from '@prisma/client';
+import { InvoiceStatus, PaymentStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
 import { NormalizedPaymentWebhook } from './payment-webhook.normalization';
 
@@ -16,6 +16,12 @@ export class PaymentWebhookProcessor {
 
   async apply(normalized: NormalizedPaymentWebhook, eventId: string) {
     return this.prisma.$transaction(async (tx) => {
+      const event = await tx.providerWebhookEvent.findUnique({
+        where: { provider_eventId: { provider: normalized.provider, eventId } },
+      });
+      if (!event) throw new NotFoundException('Provider webhook event was not recorded.');
+      if (event.processedAt) return { applied: false, reason: 'duplicate-event' as const };
+
       const payment = await tx.payment.findFirst({
         where: {
           provider: normalized.provider,
@@ -24,13 +30,11 @@ export class PaymentWebhookProcessor {
             ...(normalized.clientReference ? [{ clientReference: normalized.clientReference }] : []),
           ],
         },
-        include: { attempts: true },
+        include: {
+          attempts: true,
+          allocations: { select: { invoiceId: true } },
+        },
       });
-
-      const event = await tx.providerWebhookEvent.findUnique({
-        where: { provider_eventId: { provider: normalized.provider, eventId } },
-      });
-      if (!event) throw new NotFoundException('Provider webhook event was not recorded.');
 
       if (!payment) {
         await tx.providerWebhookEvent.update({
@@ -88,6 +92,33 @@ export class PaymentWebhookProcessor {
             failureMessage: normalized.failureMessage,
           },
         });
+      }
+
+      if (normalized.paymentStatus === PaymentStatus.SUCCEEDED) {
+        const invoiceIds = [...new Set(payment.allocations.map((allocation) => allocation.invoiceId))];
+        for (const invoiceId of invoiceIds) {
+          const invoice = await tx.studentInvoice.findUnique({
+            where: { id: invoiceId },
+            include: {
+              lines: { select: { amountDue: true } },
+              allocations: { select: { amount: true, payment: { select: { status: true } } } },
+            },
+          });
+          if (!invoice) continue;
+
+          const due = invoice.lines.reduce(
+            (sum, line) => sum.plus(line.amountDue),
+            new Prisma.Decimal(0),
+          );
+          const settled = invoice.allocations
+            .filter((allocation) => allocation.payment.status === PaymentStatus.SUCCEEDED)
+            .reduce((sum, allocation) => sum.plus(allocation.amount), new Prisma.Decimal(0));
+
+          const nextStatus = settled.gte(due) ? InvoiceStatus.PAID : InvoiceStatus.PARTIALLY_PAID;
+          if (invoice.status !== InvoiceStatus.VOID && invoice.status !== nextStatus) {
+            await tx.studentInvoice.update({ where: { id: invoice.id }, data: { status: nextStatus } });
+          }
+        }
       }
 
       await tx.providerWebhookEvent.update({

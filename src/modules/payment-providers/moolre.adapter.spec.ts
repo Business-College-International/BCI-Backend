@@ -46,6 +46,20 @@ describe('MoolreAdapter.verifyWebhook', () => {
     expect(verified.signatureVerified).toBe(true);
   });
 
+  it('verifies HMAC against the exact raw request body', async () => {
+    const adapter = makeAdapter();
+    const rawBody = '{"status":1,"code":"P01","data":{"externalref":"bci-client-ref-1"}}';
+    const verified = await adapter.verifyWebhook({
+      provider: 'MOOLRE',
+      eventId: 'evt-raw',
+      eventType: 'payment.succeeded',
+      signature: signedPayload(rawBody),
+      rawPayload: JSON.parse(rawBody),
+      rawBody,
+    });
+    expect(verified.signatureVerified).toBe(true);
+  });
+
   it('rejects a signature signed with the wrong secret', async () => {
     const adapter = makeAdapter();
     await expect(adapter.verifyWebhook({
@@ -135,7 +149,7 @@ describe('MoolreAdapter.normalizeWebhook', () => {
     expect(normalized.clientReference).toBe('bci-client-ref-1');
   });
 
-  it('maps informational (non-terminal, non-failure) events to PROCESSING', () => {
+  it('maps informational events to PROCESSING', () => {
     const adapter = makeAdapter();
     const normalized = adapter.normalizeWebhook({
       provider: 'MOOLRE',
@@ -184,10 +198,7 @@ describe('MoolreAdapter.initiatePayment', () => {
   });
 
   it('posts to the initiation endpoint with the initiation channel map in LIVE mode', async () => {
-    const httpPost = jest.fn(async () => ({
-      status: 200,
-      body: { status: 1, code: 'TR099', data: 'moolre-ref-1' },
-    }));
+    const httpPost = jest.fn(async () => ({ status: 200, body: { status: 1, code: 'TR099', data: 'moolre-ref-1' } }));
     const adapter = makeAdapter({ providerMode: 'LIVE', apiUser: 'u', apiKey: 'k', apiPubKey: 'p', accountNumber: 'ACC-1' }, httpPost);
 
     const result = await adapter.initiatePayment({
@@ -246,8 +257,6 @@ describe('moolre config gating', () => {
   it('stays in MOCK mode unless LIVE provider and credentials are set', () => {
     expect(loadMoolreConfig({}).providerMode).toBe('MOCK');
     expect(loadMoolreConfig({ MOOLRE_PROVIDER: 'LIVE' }).providerMode).toBe('MOCK');
-    expect(
-      loadMoolreConfig({ MOOLRE_PROVIDER: 'LIVE', MOOLRE_API_USER: 'u', MOOLRE_API_KEY: 'k' }).providerMode,
-    ).toBe('LIVE');
+    expect(loadMoolreConfig({ MOOLRE_PROVIDER: 'LIVE', MOOLRE_API_USER: 'u', MOOLRE_API_KEY: 'k' }).providerMode).toBe('LIVE');
   });
 });

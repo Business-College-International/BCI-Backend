@@ -1,0 +1,100 @@
+import { ConflictException, ServiceUnavailableException } from '@nestjs/common';
+import { PaymentStatus, Prisma, RoleName } from '@prisma/client';
+import { PaymentInitiationService } from './payment-initiation.service';
+
+const dto = {
+  invoiceIds: ['invoice-1'],
+  amount: '50.00',
+  network: 'Telecel',
+  callbackUrl: 'https://bci.example/payment/callback',
+};
+
+function makeService() {
+  const moolre = {
+    provider: 'MOOLRE',
+    initiatePayment: jest.fn().mockResolvedValue({
+      providerReference: 'moolre-ref-1',
+      requiresOtp: false,
+      mock: true,
+    }),
+  };
+
+  const reservationTx = {
+    idempotencyKey: { findUnique: jest.fn().mockResolvedValue(null), create: jest.fn().mockResolvedValue({}) },
+    guardian: { findUnique: jest.fn().mockResolvedValue({ personId: 'guardian-1' }) },
+    guardianStudent: { findUnique: jest.fn().mockResolvedValue({ canPayFees: true }) },
+    $executeRaw: jest.fn().mockResolvedValue([]),
+    studentInvoice: {
+      findMany: jest.fn().mockResolvedValue([{
+        id: 'invoice-1',
+        invoiceNumber: 'BCI-INV-1',
+        status: 'OPEN',
+        lines: [{ amountDue: new Prisma.Decimal('100.00') }],
+        allocations: [],
+      }]),
+    },
+    payment: {
+      create: jest.fn().mockResolvedValue({
+        id: 'payment-1',
+        amount: new Prisma.Decimal('50.00'),
+        currency: 'GHS',
+        status: PaymentStatus.PENDING,
+        clientReference: 'bci-client-ref',
+      }),
+    },
+    paymentAllocation: { create: jest.fn().mockResolvedValue({}) },
+    paymentProviderAttempt: { create: jest.fn().mockResolvedValue({ id: 'attempt-1' }) },
+    auditLog: { create: jest.fn().mockResolvedValue({}) },
+  };
+
+  const completionTx = {
+    payment: { update: jest.fn().mockResolvedValue({
+      id: 'payment-1',
+      amount: new Prisma.Decimal('50.00'),
+      currency: 'GHS',
+      status: PaymentStatus.PROCESSING,
+      clientReference: 'bci-client-ref',
+    }) },
+    paymentProviderAttempt: { update: jest.fn().mockResolvedValue({}) },
+    idempotencyKey: { update: jest.fn().mockResolvedValue({}) },
+  };
+
+  const prisma = {
+    $transaction: jest.fn()
+      .mockImplementationOnce(async (callback: (tx: any) => unknown) => callback(reservationTx))
+      .mockImplementationOnce(async (callback: (tx: any) => unknown) => callback(completionTx)),
+  };
+
+  return { service: new PaymentInitiationService(prisma as any, moolre as any), prisma, moolre, reservationTx, completionTx };
+}
+
+describe('PaymentInitiationService', () => {
+  it('requires an idempotency key', async () => {
+    const { service } = makeService();
+    await expect(service.initiate('student-1', dto, 'guardian-user', [RoleName.GUARDIAN], ''))
+      .rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('reserves invoice balance before provider initiation and forwards the selected network', async () => {
+    const { service, moolre, reservationTx } = makeService();
+
+    const result = await service.initiate('student-1', dto, 'guardian-user', [RoleName.GUARDIAN], 'idem-1');
+
+    expect(reservationTx.$executeRaw).toHaveBeenCalled();
+    expect(reservationTx.payment.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ amount: new Prisma.Decimal('50.00'), idempotencyKey: 'idem-1' }),
+    }));
+    expect(moolre.initiatePayment).toHaveBeenCalledWith(expect.objectContaining({
+      customer: expect.objectContaining({ network: 'TELECEL' }),
+    }));
+    expect(result).toMatchObject({ paymentId: 'payment-1', status: PaymentStatus.PROCESSING, providerReference: 'moolre-ref-1' });
+  });
+
+  it('rejects a provider initiation failure without throwing the raw provider error', async () => {
+    const { service, moolre } = makeService();
+    moolre.initiatePayment.mockRejectedValueOnce(new Error('provider unavailable'));
+
+    await expect(service.initiate('student-1', dto, 'guardian-user', [RoleName.GUARDIAN], 'idem-2'))
+      .rejects.toBeInstanceOf(ServiceUnavailableException);
+  });
+});

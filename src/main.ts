@@ -10,7 +10,7 @@ import { rateLimitMiddleware } from './common/security/rate-limit.middleware';
 async function bootstrap(): Promise<void> {
   validateEnvironment();
 
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create(AppModule, { bufferLogs: true, rawBody: true });
 
   app.setGlobalPrefix('api/v1');
   app.enableCors({ origin: getCorsOrigins(), credentials: true });

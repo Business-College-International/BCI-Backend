@@ -11,6 +11,7 @@ const WINDOW_MS = 60_000;
 const GENERAL_LIMIT = 120;
 const AUTH_LIMIT = 15;
 const PUBLIC_APPLICATION_LIMIT = 10;
+const WEBHOOK_LIMIT = 300;
 
 function clientKey(request: Request): string {
   const forwarded = request.headers['x-forwarded-for'];
@@ -21,6 +22,7 @@ function clientKey(request: Request): string {
 function limitForPath(path: string): number {
   if (path.includes('/auth/')) return AUTH_LIMIT;
   if (path === '/api/v1/applications') return PUBLIC_APPLICATION_LIMIT;
+  if (path.startsWith('/api/v1/payment-providers/webhooks/')) return WEBHOOK_LIMIT;
   return GENERAL_LIMIT;
 }
 

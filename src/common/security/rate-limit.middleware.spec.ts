@@ -42,4 +42,17 @@ describe('rateLimitMiddleware', () => {
     expect(response.status).toHaveBeenCalledWith(429);
     expect(response.setHeader).toHaveBeenCalledWith('Retry-After', expect.any(String));
   });
+
+  it('allows provider webhook retries beyond the general API budget', () => {
+    const request = makeRequest('/api/v1/payment-providers/webhooks/moolre');
+    const response = makeResponse();
+    const next = jest.fn();
+
+    for (let i = 0; i < 121; i += 1) {
+      rateLimitMiddleware(request, response, next);
+    }
+
+    expect(next).toHaveBeenCalledTimes(121);
+    expect(response.status).not.toHaveBeenCalledWith(429);
+  });
 });
