@@ -1,5 +1,5 @@
 import { PaymentStatus, Prisma, RoleName } from '@prisma/client';
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ServiceUnavailableException } from '@nestjs/common';
 import { PaymentOtpService } from './payment-otp.service';
 
 function makePrisma() {
@@ -9,7 +9,7 @@ function makePrisma() {
     guardianStudent: { findUnique: jest.fn(), findFirst: jest.fn() },
     payment: { findUnique: jest.fn(), update: jest.fn() },
     person: { findUnique: jest.fn() },
-    paymentProviderAttempt: { findFirst: jest.fn(), update: jest.fn() },
+    paymentProviderAttempt: { findFirst: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
     auditLog: { create: jest.fn() },
     $transaction: jest.fn(),
   } as any;
@@ -125,5 +125,50 @@ describe('PaymentOtpService', () => {
       where: { id: 'attempt-1' },
       data: expect.objectContaining({ status: PaymentStatus.FAILED, failureCode: 'OTP_SUBMISSION_FAILED' }),
     }));
+  });
+
+  it('keeps an ambiguous OTP submission in processing and requires reconciliation before another OTP', async () => {
+    const prisma = makePrisma();
+    const adapter = makeAdapter();
+    prisma.$transaction.mockImplementation(async (callback: (tx: any) => unknown) => callback(prisma));
+    prisma.idempotencyKey.findUnique.mockResolvedValue(null);
+    prisma.guardian.findUnique.mockResolvedValue({ personId: 'guardian-1' });
+    prisma.guardianStudent.findUnique.mockResolvedValue({ canPayFees: true });
+    prisma.payment.findUnique.mockResolvedValue({
+      id: 'payment-1', studentId: 'student-1', guardianId: 'guardian-1',
+      amount: new Prisma.Decimal('50.00'), currency: 'GHS', status: PaymentStatus.PROCESSING,
+      provider: 'MOOLRE', providerReference: null, clientReference: 'bci-ref-1',
+    });
+    prisma.paymentProviderAttempt.findFirst
+      .mockResolvedValueOnce({
+        id: 'attempt-1',
+        responsePayload: { requiresOtp: true, sessionId: 'session-1', network: 'MTN' },
+      })
+      .mockResolvedValueOnce({
+        id: 'attempt-1',
+        responsePayload: { requiresOtp: true, sessionId: 'session-1', network: 'MTN', otpOutcomeUnknown: true },
+      });
+    prisma.person.findUnique.mockResolvedValue({ phone: '0244000000' });
+    prisma.paymentProviderAttempt.updateMany.mockResolvedValue({ count: 1 });
+    prisma.idempotencyKey.create.mockResolvedValue({});
+    adapter.submitPaymentOtp.mockRejectedValue(new Error('provider timeout after request'));
+
+    const service = new PaymentOtpService(prisma, adapter);
+    await expect(service.submit('student-1', 'payment-1', { otpCode: '123456' }, 'guardian-user', [RoleName.GUARDIAN], 'otp-idem-3'))
+      .rejects.toBeInstanceOf(ServiceUnavailableException);
+
+    expect(prisma.paymentProviderAttempt.updateMany).toHaveBeenCalledWith({
+      where: { id: 'attempt-1', status: { in: [PaymentStatus.PENDING, PaymentStatus.PROCESSING] } },
+      data: expect.objectContaining({
+        status: PaymentStatus.PROCESSING,
+        failureCode: 'OTP_SUBMISSION_UNKNOWN',
+        responsePayload: expect.objectContaining({ otpOutcomeUnknown: true }),
+      }),
+    });
+    expect(prisma.idempotencyKey.update).not.toHaveBeenCalled();
+
+    await expect(service.submit('student-1', 'payment-1', { otpCode: '654321' }, 'guardian-user', [RoleName.GUARDIAN], 'otp-idem-4'))
+      .rejects.toBeInstanceOf(ConflictException);
+    expect(adapter.submitPaymentOtp).toHaveBeenCalledTimes(1);
   });
 });

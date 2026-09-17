@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { PaymentStatus, Prisma, RoleName } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { PrismaService } from '../../prisma.service';
@@ -99,6 +99,9 @@ export class PaymentOtpService {
       if (!payer) throw new ConflictException('Payment payer information is unavailable for OTP continuation.');
 
       const responsePayload = asRecord(attempt.responsePayload);
+      if (responsePayload.otpOutcomeUnknown === true) {
+        throw new ConflictException('The previous OTP submission outcome is unknown; reconcile the payment before submitting another OTP.');
+      }
       if (responsePayload.requiresOtp !== true) {
         throw new ConflictException('This payment is not awaiting OTP submission.');
       }
@@ -121,6 +124,7 @@ export class PaymentOtpService {
         payer,
         network: selectedNetwork,
         sessionId: dto.sessionId ?? storedSessionId,
+        responsePayload,
       };
     }, {
       isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
@@ -143,26 +147,49 @@ export class PaymentOtpService {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Moolre OTP submission failed.';
-      await this.prisma.$transaction(async (tx) => {
-        await tx.paymentProviderAttempt.update({
-          where: { id: reservation.attemptId },
-          data: {
-            status: PaymentStatus.FAILED,
-            resolvedAt: new Date(),
-            failureCode: 'OTP_SUBMISSION_FAILED',
-            failureMessage: message,
-          },
+      if (error instanceof BadRequestException) {
+        await this.prisma.$transaction(async (tx) => {
+          await tx.paymentProviderAttempt.update({
+            where: { id: reservation.attemptId },
+            data: {
+              status: PaymentStatus.FAILED,
+              resolvedAt: new Date(),
+              failureCode: 'OTP_SUBMISSION_FAILED',
+              failureMessage: message,
+            },
+          });
+          await tx.idempotencyKey.update({
+            where: { userId_key_operation: { userId: actorUserId, key: idempotencyKey.trim(), operation: 'payments.otp' } },
+            data: {
+              responseJson: { paymentId, status: PaymentStatus.PROCESSING, retryable: true },
+              statusCode: 400,
+              completedAt: new Date(),
+            },
+          });
         });
-        await tx.idempotencyKey.update({
-          where: { userId_key_operation: { userId: actorUserId, key: idempotencyKey.trim(), operation: 'payments.otp' } },
+        throw error;
+      }
+
+      await this.prisma.$transaction(async (tx) => {
+        await tx.paymentProviderAttempt.updateMany({
+          where: {
+            id: reservation.attemptId,
+            status: { in: [PaymentStatus.PENDING, PaymentStatus.PROCESSING] },
+          },
           data: {
-            responseJson: { paymentId, status: PaymentStatus.PROCESSING, retryable: true },
-            statusCode: 400,
-            completedAt: new Date(),
+            status: PaymentStatus.PROCESSING,
+            resolvedAt: null,
+            failureCode: 'OTP_SUBMISSION_UNKNOWN',
+            failureMessage: 'OTP submission outcome is unknown; awaiting webhook reconciliation.',
+            responsePayload: {
+              ...reservation.responsePayload,
+              otpOutcomeUnknown: true,
+            },
           },
         });
       });
-      throw error;
+
+      throw new ServiceUnavailableException('OTP submission outcome is unknown; the payment remains processing and requires webhook reconciliation.');
     }
 
     const response = {
