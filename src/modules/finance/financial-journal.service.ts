@@ -27,7 +27,7 @@ export class FinancialJournalService {
     const parsed = lines.map((line) => ({
       ...line,
       amount: new Prisma.Decimal(line.amount),
-      currency: line.currency ?? 'GHS',
+      currency: (line.currency ?? 'GHS').trim().toUpperCase(),
     }));
 
     if (parsed.some((line) => line.amount.lte(0))) {
@@ -43,6 +43,11 @@ export class FinancialJournalService {
 
     if (!debit.eq(credit)) {
       throw new BadRequestException('Journal transaction is not balanced.');
+    }
+
+    const currency = parsed[0].currency;
+    if (parsed.some((line) => line.currency !== currency)) {
+      throw new BadRequestException('All journal lines must use the same currency.');
     }
 
     const referenceType = parsed[0].referenceType.trim();
