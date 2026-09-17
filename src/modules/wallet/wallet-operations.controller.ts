@@ -1,4 +1,4 @@
-import { Body, Param, ParseUUIDPipe, Post, Req, UseGuards, Controller } from '@nestjs/common';
+import { Body, Headers, Param, ParseUUIDPipe, Post, Req, UseGuards, Controller } from '@nestjs/common';
 import { RoleName } from '@prisma/client';
 import { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -20,8 +20,9 @@ export class WalletOperationsController {
   withdraw(
     @Param('studentId', new ParseUUIDPipe()) studentId: string,
     @Body() dto: WithdrawWalletDto,
+    @Headers('idempotency-key') idempotencyKey: string,
     @Req() request: AuthenticatedRequest,
   ) {
-    return this.operations.withdraw(studentId, dto, request.user.id, request.user.roles);
+    return this.operations.withdraw(studentId, dto, request.user.id, request.user.roles, idempotencyKey);
   }
 }
