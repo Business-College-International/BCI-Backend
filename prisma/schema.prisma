@@ -11,26 +11,144 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum RoleName { DIRECTOR PRINCIPAL OFFICE ACCOUNTANT TEACHER SUPPORT_STAFF GUARDIAN APPLICANT }
-enum Level { KG1 KG2 P1 P2 P3 P4 P5 P6 JHS1 JHS2 JHS3 SHS1 SHS2 SHS3 }
-enum Programme { NONE AGRIC GENERAL_ARTS BUSINESS HOME_ECONOMICS }
-enum UserStatus { ACTIVE SUSPENDED DISABLED }
-enum StudentStatus { ACTIVE GRADUATED WITHDRAWN TRANSFERRED }
-enum ApplicationStatus { PENDING UNDER_REVIEW ADMITTED REJECTED WITHDRAWN }
-enum EnrollmentStatus { ACTIVE COMPLETED WITHDRAWN TRANSFERRED }
-enum TermStatus { DRAFT OPEN CLOSED }
-enum AttendanceStatus { PRESENT ABSENT LATE EXCUSED }
-enum AssessmentType { CLASSWORK TEST EXAM PROJECT OTHER }
-enum InvoiceStatus { OPEN PARTIALLY_PAID PAID VOID }
-enum PaymentStatus { PENDING PROCESSING SUCCEEDED FAILED CANCELLED REFUNDED }
-enum PaymentPurpose { FEE WALLET_TOP_UP STATIONERY OTHER }
-enum WalletTransactionType { TOP_UP WITHDRAWAL REVERSAL }
-enum ExpenseStatus { DRAFT SUBMITTED APPROVED REJECTED PAID VOID }
-enum PayrollPeriodStatus { DRAFT CALCULATED APPROVED PROCESSING PAID CLOSED }
-enum DisbursementStatus { PENDING PROCESSING SUCCEEDED FAILED REVERSED }
-enum AdmissionDecision { ADMITTED REJECTED }
-enum AuditAction { CREATE UPDATE DELETE APPROVE REJECT LOGIN LOGOUT DISBURSE RECONCILE }
-
+enum RoleName {
+  DIRECTOR
+  PRINCIPAL
+  OFFICE
+  ACCOUNTANT
+  TEACHER
+  SUPPORT_STAFF
+  GUARDIAN
+  APPLICANT
+}
+enum Level {
+  KG1
+  KG2
+  P1
+  P2
+  P3
+  P4
+  P5
+  P6
+  JHS1
+  JHS2
+  JHS3
+  SHS1
+  SHS2
+  SHS3
+}
+enum Programme {
+  NONE
+  AGRIC
+  GENERAL_ARTS
+  BUSINESS
+  HOME_ECONOMICS
+}
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  DISABLED
+}
+enum StudentStatus {
+  ACTIVE
+  GRADUATED
+  WITHDRAWN
+  TRANSFERRED
+}
+enum ApplicationStatus {
+  PENDING
+  UNDER_REVIEW
+  ADMITTED
+  REJECTED
+  WITHDRAWN
+}
+enum EnrollmentStatus {
+  ACTIVE
+  COMPLETED
+  WITHDRAWN
+  TRANSFERRED
+}
+enum TermStatus {
+  DRAFT
+  OPEN
+  CLOSED
+}
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  EXCUSED
+}
+enum AssessmentType {
+  CLASSWORK
+  TEST
+  EXAM
+  PROJECT
+  OTHER
+}
+enum InvoiceStatus {
+  OPEN
+  PARTIALLY_PAID
+  PAID
+  VOID
+}
+enum PaymentStatus {
+  PENDING
+  PROCESSING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+  REFUNDED
+}
+enum PaymentPurpose {
+  FEE
+  WALLET_TOP_UP
+  STATIONERY
+  OTHER
+}
+enum WalletTransactionType {
+  TOP_UP
+  WITHDRAWAL
+  REVERSAL
+}
+enum ExpenseStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  PAID
+  VOID
+}
+enum PayrollPeriodStatus {
+  DRAFT
+  CALCULATED
+  APPROVED
+  PROCESSING
+  PAID
+  CLOSED
+}
+enum DisbursementStatus {
+  PENDING
+  PROCESSING
+  SUCCEEDED
+  FAILED
+  REVERSED
+}
+enum AdmissionDecision {
+  ADMITTED
+  REJECTED
+}
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  APPROVE
+  REJECT
+  LOGIN
+  LOGOUT
+  DISBURSE
+  RECONCILE
+}
 model Person {
   id                 String   @id @default(uuid())
   firstName          String
