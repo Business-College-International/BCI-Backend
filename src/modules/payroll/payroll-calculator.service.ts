@@ -23,6 +23,17 @@ export class PayrollCalculatorService {
       });
       if (staff.length === 0) throw new BadRequestException('No active staff with salary structures are available for calculation.');
 
+      const ineligible = staff.filter((member) => {
+        const salary = member.salary!;
+        return salary.effectiveAt > period.endsAt
+          || (salary.endedAt !== null && salary.endedAt < period.startsAt);
+      });
+      if (ineligible.length > 0) {
+        throw new BadRequestException(
+          `Active staff have salary structures that do not apply to payroll period ${period.code}: ${ineligible.map((member) => member.staffIdNo).join(', ')}.`,
+        );
+      }
+
       for (const member of staff) {
         const salary = member.salary!;
         const calculation = calculateCompensation({ basePay: salary.basePay, allowances: salary.allowances, deductions: salary.deductions });
