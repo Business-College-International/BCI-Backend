@@ -7,7 +7,7 @@ function makePrisma() {
     idempotencyKey: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
     guardian: { findUnique: jest.fn() },
     guardianStudent: { findUnique: jest.fn(), findFirst: jest.fn() },
-    payment: { findUnique: jest.fn(), update: jest.fn() },
+    payment: { findUnique: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
     person: { findUnique: jest.fn() },
     paymentProviderAttempt: { findFirst: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
     auditLog: { create: jest.fn() },
@@ -56,6 +56,8 @@ describe('PaymentOtpService', () => {
     prisma.person.findUnique.mockResolvedValue({ phone: '0244000000' });
     prisma.paymentProviderAttempt.update.mockResolvedValue({});
     prisma.payment.update.mockResolvedValue({});
+    prisma.paymentProviderAttempt.updateMany.mockResolvedValue({ count: 1 });
+    prisma.payment.updateMany.mockResolvedValue({ count: 1 });
     prisma.auditLog.create.mockResolvedValue({});
     prisma.idempotencyKey.create.mockResolvedValue({});
     prisma.idempotencyKey.update.mockResolvedValue({});
@@ -90,6 +92,8 @@ describe('PaymentOtpService', () => {
       status: PaymentStatus.PROCESSING,
       network: 'TELECEL',
     });
+    expect(prisma.payment.updateMany).toHaveBeenCalled();
+    expect(prisma.paymentProviderAttempt.updateMany).toHaveBeenCalled();
     expect(prisma.idempotencyKey.create).toHaveBeenCalled();
     expect(prisma.idempotencyKey.update).toHaveBeenCalled();
   });
@@ -170,5 +174,51 @@ describe('PaymentOtpService', () => {
     await expect(service.submit('student-1', 'payment-1', { otpCode: '654321' }, 'guardian-user', [RoleName.GUARDIAN], 'otp-idem-4'))
       .rejects.toBeInstanceOf(ConflictException);
     expect(adapter.submitPaymentOtp).toHaveBeenCalledTimes(1);
+  });
+
+  it('recovers a provider-accepted OTP when the first local persistence attempt fails', async () => {
+    const prisma = makePrisma();
+    const adapter = makeAdapter();
+    prisma.idempotencyKey.findUnique.mockResolvedValue(null);
+    prisma.guardian.findUnique.mockResolvedValue({ personId: 'guardian-1' });
+    prisma.guardianStudent.findUnique.mockResolvedValue({ canPayFees: true });
+    prisma.payment.findUnique.mockResolvedValue({
+      id: 'payment-1', studentId: 'student-1', guardianId: 'guardian-1',
+      amount: new Prisma.Decimal('50.00'), currency: 'GHS', status: PaymentStatus.PROCESSING,
+      provider: 'MOOLRE', providerReference: null, clientReference: 'bci-ref-1',
+    });
+    prisma.paymentProviderAttempt.findFirst.mockResolvedValue({
+      id: 'attempt-1',
+      responsePayload: { requiresOtp: true, sessionId: 'session-1', network: 'MTN' },
+    });
+    prisma.person.findUnique.mockResolvedValue({ phone: '0244000000' });
+    prisma.idempotencyKey.create.mockResolvedValue({});
+    prisma.payment.updateMany.mockResolvedValue({ count: 1 });
+    prisma.paymentProviderAttempt.updateMany.mockResolvedValue({ count: 1 });
+    prisma.auditLog.create.mockResolvedValue({});
+    prisma.idempotencyKey.update.mockResolvedValue({});
+    adapter.submitPaymentOtp.mockResolvedValue({
+      providerReference: 'moolre-ref-otp-2',
+      requiresOtp: false,
+      mock: false,
+      sessionId: 'session-1',
+    });
+    prisma.$transaction
+      .mockImplementationOnce(async (callback: (tx: any) => unknown) => callback(prisma))
+      .mockRejectedValueOnce(new Error('database unavailable'))
+      .mockImplementationOnce(async (callback: (tx: any) => unknown) => callback(prisma));
+
+    const service = new PaymentOtpService(prisma, adapter);
+    const result = await service.submit('student-1', 'payment-1', { otpCode: '123456' }, 'guardian-user', [RoleName.GUARDIAN], 'otp-idem-5');
+
+    expect(result).toMatchObject({ paymentId: 'payment-1', providerReference: 'moolre-ref-otp-2', status: PaymentStatus.PROCESSING });
+    expect(prisma.$transaction).toHaveBeenCalledTimes(3);
+    expect(prisma.payment.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'payment-1', status: { in: [PaymentStatus.PENDING, PaymentStatus.PROCESSING] } },
+      data: expect.objectContaining({ providerReference: 'moolre-ref-otp-2' }),
+    }));
+    expect(prisma.idempotencyKey.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ statusCode: 202, responseJson: expect.objectContaining({ providerReference: 'moolre-ref-otp-2' }) }),
+    }));
   });
 });
