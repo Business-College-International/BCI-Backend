@@ -30,7 +30,7 @@ function makePrisma(tx: ReturnType<typeof makeTx>) {
 
 const managerRoles = [RoleName.ACCOUNTANT];
 
-function makePeriod(status = PayrollPeriodStatus.DRAFT) {
+function makePeriod(status: PayrollPeriodStatus = PayrollPeriodStatus.DRAFT) {
   return {
     id: 'period-1',
     code: '2026-09',
