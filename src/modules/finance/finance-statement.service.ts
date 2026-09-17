@@ -44,19 +44,20 @@ export class FinanceStatementService {
           term: { select: { id: true, code: true, name: true, startsAt: true, endsAt: true } },
           lines: { select: { id: true, description: true, amountDue: true } },
           allocations: {
-            where: { payment: { status: PaymentStatus.SUCCEEDED, purpose: PaymentPurpose.FEE } },
+            where: { payment: { status: { in: [PaymentStatus.SUCCEEDED, PaymentStatus.REFUNDED] }, purpose: PaymentPurpose.FEE } },
             select: {
               amount: true,
-              payment: { select: { id: true, status: true, completedAt: true, receipt: true } },
+              payment: { select: { id: true, status: true, completedAt: true, receipt: true, refunds: { select: { amount: true, status: true } } } },
             },
           },
         },
         orderBy: { issuedAt: 'desc' },
       }),
       this.prisma.payment.findMany({
-        where: { studentId, status: PaymentStatus.SUCCEEDED, purpose: PaymentPurpose.FEE },
+        where: { studentId, status: { in: [PaymentStatus.SUCCEEDED, PaymentStatus.REFUNDED] }, purpose: PaymentPurpose.FEE },
         include: {
           receipt: true,
+          refunds: { select: { amount: true, status: true } },
           allocations: {
             where: { invoice: { studentId } },
             include: { invoice: { select: { invoiceNumber: true } } },
@@ -68,7 +69,10 @@ export class FinanceStatementService {
 
     const invoiceViews = invoices.map((invoice) => {
       const totalDue = invoice.lines.reduce((sum, line) => sum.plus(line.amountDue), new Prisma.Decimal(0));
-      const paid = invoice.allocations.reduce((sum, allocation) => sum.plus(allocation.amount), new Prisma.Decimal(0));
+      const paid = invoice.allocations.reduce((sum, allocation) => {
+        const refunded = successfulRefundAmount(allocation.payment.refunds);
+        return sum.plus(Prisma.Decimal.max(allocation.amount.minus(refunded), new Prisma.Decimal(0)));
+      }, new Prisma.Decimal(0));
       const outstanding = Prisma.Decimal.max(totalDue.minus(paid), new Prisma.Decimal(0));
       return {
         invoiceId: invoice.id,
@@ -86,11 +90,17 @@ export class FinanceStatementService {
           description: line.description,
           amountDue: line.amountDue.toFixed(2),
         })),
-        allocations: invoice.allocations.map((allocation) => ({
-          amount: allocation.amount.toFixed(2),
-          completedAt: allocation.payment.completedAt,
-          paymentId: allocation.payment.id,
-        })),
+        allocations: invoice.allocations.map((allocation) => {
+          const refunded = successfulRefundAmount(allocation.payment.refunds);
+          const netAmount = Prisma.Decimal.max(allocation.amount.minus(refunded), new Prisma.Decimal(0));
+          return {
+            amount: netAmount.toFixed(2),
+            originalAmount: allocation.amount.toFixed(2),
+            refundedAmount: refunded.toFixed(2),
+            completedAt: allocation.payment.completedAt,
+            paymentId: allocation.payment.id,
+          };
+        }),
       };
     });
 
@@ -110,24 +120,37 @@ export class FinanceStatementService {
         totalOutstanding: totalOutstanding.toFixed(2),
       },
       invoices: invoiceViews,
-      receipts: payments.map((payment) => ({
-        paymentId: payment.id,
-        amount: payment.amount.toFixed(2),
-        currency: payment.currency,
-        purpose: payment.purpose,
-        completedAt: payment.completedAt,
-        receipt: payment.receipt
-          ? {
-              receiptNumber: payment.receipt.receiptNumber,
-              fileUrl: payment.receipt.fileUrl,
-              issuedAt: payment.receipt.issuedAt,
-            }
-          : null,
-        allocations: payment.allocations.map((allocation) => ({
-          invoiceNumber: allocation.invoice.invoiceNumber,
-          amount: allocation.amount.toFixed(2),
-        })),
-      })),
+      receipts: payments.map((payment) => {
+        const refunded = successfulRefundAmount(payment.refunds);
+        const netAmount = Prisma.Decimal.max(payment.amount.minus(refunded), new Prisma.Decimal(0));
+        return {
+          paymentId: payment.id,
+          amount: payment.amount.toFixed(2),
+          originalAmount: payment.amount.toFixed(2),
+          refundedAmount: refunded.toFixed(2),
+          netAmount: netAmount.toFixed(2),
+          currency: payment.currency,
+          purpose: payment.purpose,
+          completedAt: payment.completedAt,
+          receipt: payment.receipt
+            ? {
+                receiptNumber: payment.receipt.receiptNumber,
+                fileUrl: payment.receipt.fileUrl,
+                issuedAt: payment.receipt.issuedAt,
+              }
+            : null,
+          allocations: payment.allocations.map((allocation) => ({
+            invoiceNumber: allocation.invoice.invoiceNumber,
+            amount: allocation.amount.toFixed(2),
+          })),
+        };
+      }),
     };
   }
+}
+
+function successfulRefundAmount(refunds: Array<{ amount: Prisma.Decimal; status: PaymentStatus }>) {
+  return refunds
+    .filter((refund) => refund.status === PaymentStatus.SUCCEEDED)
+    .reduce((sum, refund) => sum.plus(refund.amount), new Prisma.Decimal(0));
 }
