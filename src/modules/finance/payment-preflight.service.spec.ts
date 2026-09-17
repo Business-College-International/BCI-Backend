@@ -47,7 +47,7 @@ describe('PaymentPreflightService', () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
-  it('builds oldest-due-first allocation and reports pending payments', async () => {
+  it('builds oldest-due-first allocation from net balances and reports pending payments', async () => {
     const prisma = makePrisma();
     prisma.guardian.findUnique.mockResolvedValue({ personId: 'guardian-1' });
     prisma.guardianStudent.findUnique.mockResolvedValue({ canPayFees: true });
@@ -61,7 +61,7 @@ describe('PaymentPreflightService', () => {
         dueAt: new Date('2026-09-10T00:00:00Z'),
         issuedAt: new Date('2026-09-01T00:00:00Z'),
         lines: [{ amountDue: new Prisma.Decimal('500.00') }],
-        allocations: [{ amount: new Prisma.Decimal('100.00') }],
+        allocations: [{ amount: new Prisma.Decimal('200.00'), payment: { refunds: [{ amount: new Prisma.Decimal('100.00'), status: 'SUCCEEDED' }] } }],
         term: { id: 'term-1', code: 'T1', name: 'Term 1' },
       },
       {
@@ -99,6 +99,6 @@ describe('PaymentPreflightService', () => {
       { invoiceId: 'invoice-2', invoiceNumber: 'BCI-2', termId: 'term-1', amount: '500.00' },
     ]);
     expect(result.pendingPayments.amount).toBe('100.00');
-    expect(result.reservation.available).toBe(false);
+    expect(result.reservation.available).toBe(true);
   });
 });
