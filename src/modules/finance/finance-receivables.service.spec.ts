@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { InvoiceStatus, RoleName } from '@prisma/client';
+import { InvoiceStatus, PaymentStatus, RoleName } from '@prisma/client';
 import { FinanceReceivablesService } from './finance-receivables.service';
 
 function makePrisma() {
@@ -28,13 +28,17 @@ describe('FinanceReceivablesService', () => {
     expect(prisma.studentInvoice.update).not.toHaveBeenCalled();
   });
 
-  it('builds ageing buckets from outstanding invoice balances', async () => {
+  it('builds ageing buckets from successful payment allocations only', async () => {
     const prisma = makePrisma();
     const asOf = new Date('2026-09-15T00:00:00.000Z');
     prisma.studentInvoice.findMany.mockResolvedValue([
       {
         id: 'invoice-1', invoiceNumber: 'BCI-1', dueAt: new Date('2026-09-10T00:00:00.000Z'),
-        lines: [{ amountDue: '500.00' }], allocations: [{ amount: '100.00' }],
+        lines: [{ amountDue: '500.00' }],
+        allocations: [
+          { amount: '100.00', payment: { status: PaymentStatus.SUCCEEDED } },
+          { amount: '100.00', payment: { status: PaymentStatus.PROCESSING } },
+        ],
         student: { id: 'student-1', admissionNumber: 'BCI-001', firstName: 'Ama', lastName: 'Doe' },
       },
       {
