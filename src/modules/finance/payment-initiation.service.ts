@@ -55,8 +55,9 @@ export class PaymentInitiationService {
 
     if ('existing' in reservation) return reservation.existing;
 
+    let providerResult: Awaited<ReturnType<MoolreAdapter['initiatePayment']>>;
     try {
-      const providerResult = await this.moolre.initiatePayment({
+      providerResult = await this.moolre.initiatePayment({
         clientReference: reservation.payment.clientReference!,
         amount: reservation.payment.amount.toFixed(2),
         currency: reservation.payment.currency,
@@ -64,7 +65,41 @@ export class PaymentInitiationService {
         callbackUrl: dto.callbackUrl ?? '',
         customer: reservation.customer,
       });
+    } catch (error) {
+      await this.prisma.$transaction(async (tx) => {
+        const failedAt = new Date();
+        await tx.payment.update({
+          where: { id: reservation.payment.id },
+          data: {
+            status: PaymentStatus.FAILED,
+            failureCode: 'PROVIDER_INITIATION_FAILED',
+            failureMessage: error instanceof Error ? error.message : 'Payment provider initiation failed.',
+            completedAt: failedAt,
+          },
+        });
+        await tx.paymentProviderAttempt.update({
+          where: { id: reservation.attemptId },
+          data: {
+            status: PaymentStatus.FAILED,
+            resolvedAt: failedAt,
+            failureCode: 'PROVIDER_INITIATION_FAILED',
+            failureMessage: error instanceof Error ? error.message : 'Payment provider initiation failed.',
+          },
+        });
+        await tx.idempotencyKey.update({
+          where: { userId_key_operation: { userId: actorUserId, key: idempotencyKey.trim(), operation: 'payments.initiate' } },
+          data: {
+            responseJson: { paymentId: reservation.payment.id, status: PaymentStatus.FAILED },
+            statusCode: 503,
+            completedAt: failedAt,
+          },
+        });
+      });
 
+      throw new ServiceUnavailableException('Payment provider initiation failed; no funds were captured.');
+    }
+
+    try {
       const status = PaymentStatus.PROCESSING;
       const updated = await this.prisma.$transaction(async (tx) => {
         const payment = await tx.payment.update({
@@ -115,38 +150,11 @@ export class PaymentInitiationService {
       });
 
       return updated;
-    } catch (error) {
-      await this.prisma.$transaction(async (tx) => {
-        const failedAt = new Date();
-        await tx.payment.update({
-          where: { id: reservation.payment.id },
-          data: {
-            status: PaymentStatus.FAILED,
-            failureCode: 'PROVIDER_INITIATION_FAILED',
-            failureMessage: error instanceof Error ? error.message : 'Payment provider initiation failed.',
-            completedAt: failedAt,
-          },
-        });
-        await tx.paymentProviderAttempt.update({
-          where: { id: reservation.attemptId },
-          data: {
-            status: PaymentStatus.FAILED,
-            resolvedAt: failedAt,
-            failureCode: 'PROVIDER_INITIATION_FAILED',
-            failureMessage: error instanceof Error ? error.message : 'Payment provider initiation failed.',
-          },
-        });
-        await tx.idempotencyKey.update({
-          where: { userId_key_operation: { userId: actorUserId, key: idempotencyKey.trim(), operation: 'payments.initiate' } },
-          data: {
-            responseJson: { paymentId: reservation.payment.id, status: PaymentStatus.FAILED },
-            statusCode: 503,
-            completedAt: failedAt,
-          },
-        });
-      });
-
-      throw new ServiceUnavailableException('Payment provider initiation failed; no funds were captured.');
+    } catch {
+      // The provider has accepted the payment request, but local persistence failed.
+      // Deliberately do not mark the payment FAILED: the provider/webhook path must be
+      // allowed to reconcile the transaction using the already-created client reference.
+      throw new ServiceUnavailableException('Payment provider accepted the request; local state is awaiting reconciliation.');
     }
   }
 
