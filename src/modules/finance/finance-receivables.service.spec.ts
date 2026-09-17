@@ -71,14 +71,17 @@ describe('FinanceReceivablesService', () => {
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
-  it('builds ageing buckets from net outstanding invoice balances after refunds', async () => {
+  it('builds ageing buckets from settled invoice balances and ignores processing allocations', async () => {
     const prisma = makePrisma();
     const asOf = new Date('2026-09-15T00:00:00.000Z');
     prisma.studentInvoice.findMany.mockResolvedValue([
       {
         id: 'invoice-1', invoiceNumber: 'BCI-1', dueAt: new Date('2026-09-10T00:00:00.000Z'),
         lines: [{ amountDue: new Prisma.Decimal('500.00') }],
-        allocations: [{ amount: new Prisma.Decimal('200.00'), payment: { refunds: [{ amount: new Prisma.Decimal('100.00'), status: PaymentStatus.SUCCEEDED }] } }],
+        allocations: [
+          { amount: new Prisma.Decimal('200.00'), payment: { status: PaymentStatus.PROCESSING, refunds: [] } },
+          { amount: new Prisma.Decimal('200.00'), payment: { status: PaymentStatus.SUCCEEDED, refunds: [{ amount: new Prisma.Decimal('100.00'), status: PaymentStatus.SUCCEEDED }] } },
+        ],
         student: { id: 'student-1', admissionNumber: 'BCI-001', firstName: 'Ama', lastName: 'Doe' },
       },
       {
@@ -96,6 +99,32 @@ describe('FinanceReceivablesService', () => {
     expect(result.totals.days61to90).toBe('1000.00');
     expect(result.totals.outstanding).toBe('1400.00');
     expect(result.rows).toHaveLength(2);
+  });
+
+  it('ignores processing allocations in invoice settlement reporting', async () => {
+    const prisma = makePrisma();
+    prisma.studentInvoice.findMany.mockResolvedValue([
+      {
+        id: 'invoice-1',
+        invoiceNumber: 'BCI-1',
+        status: InvoiceStatus.OPEN,
+        issuedAt: new Date('2026-09-01T00:00:00.000Z'),
+        dueAt: null,
+        lines: [{ amountDue: new Prisma.Decimal('200.00') }],
+        allocations: [
+          { amount: new Prisma.Decimal('100.00'), payment: { status: PaymentStatus.PROCESSING, refunds: [] } },
+          { amount: new Prisma.Decimal('100.00'), payment: { status: PaymentStatus.SUCCEEDED, refunds: [] } },
+        ],
+        student: { admissionNumber: 'BCI-001', firstName: 'Ama', lastName: 'Doe' },
+        term: { id: 'term-1', code: 'T1', name: 'Term 1' },
+      },
+    ]);
+
+    const service = new FinanceReceivablesService(prisma as never);
+    const result = await service.listInvoices({}, 'accountant-1', [RoleName.ACCOUNTANT]);
+
+    expect(result[0].allocatedAmount).toBe('100.00');
+    expect(result[0].outstandingAmount).toBe('100.00');
   });
 
   it('reports a refunded payment as reducing the invoice allocated balance', async () => {
