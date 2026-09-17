@@ -82,6 +82,11 @@ export class MoolreDisbursementService {
     const narration = (input.narration ?? 'BCI disbursement').slice(0, 160);
 
     if (this.config.providerMode === 'MOCK') {
+      const existing = this.mockLedger.get(input.referenceId);
+      if (existing) {
+        return { providerReference: existing.providerReference, status: existing.status, mock: true };
+      }
+
       const providerReference = `mock-moolre-tx-${Date.now()}`;
       this.mockLedger.set(input.referenceId, { status: 'PENDING', providerReference });
       return { providerReference, status: 'PENDING', mock: true };
