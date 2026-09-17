@@ -22,14 +22,24 @@ export class PaymentWebhookProcessor {
       if (!event) throw new NotFoundException('Provider webhook event was not recorded.');
       if (event.processedAt) return { applied: false, reason: 'duplicate-event' as const };
 
+      const paymentWhere = normalized.providerReference && normalized.clientReference
+        ? {
+            provider: normalized.provider,
+            providerReference: normalized.providerReference,
+            clientReference: normalized.clientReference,
+          }
+        : normalized.providerReference
+          ? {
+              provider: normalized.provider,
+              providerReference: normalized.providerReference,
+            }
+          : {
+              provider: normalized.provider,
+              clientReference: normalized.clientReference!,
+            };
+
       const payment = await tx.payment.findFirst({
-        where: {
-          provider: normalized.provider,
-          OR: [
-            { providerReference: normalized.providerReference },
-            ...(normalized.clientReference ? [{ clientReference: normalized.clientReference }] : []),
-          ],
-        },
+        where: paymentWhere,
         include: {
           attempts: true,
           allocations: { select: { invoiceId: true } },
