@@ -171,7 +171,7 @@ describe('RefundService', () => {
     }));
   });
 
-  it('fails the refund when provider initiation fails', async () => {
+  it('keeps an ambiguous refund in processing when provider initiation and status lookup are both unavailable', async () => {
     const prisma = mockPrisma();
     const deps = mockDeps();
     prisma.$transaction.mockImplementation(async (callback: (client: any) => unknown) => callback(prisma));
@@ -182,11 +182,45 @@ describe('RefundService', () => {
     });
     prisma.refund.updateMany.mockResolvedValue({ count: 1 });
     prisma.person.findUnique.mockResolvedValue({ phone: '0240000000' });
-    deps.disbursements.initiateTransfer.mockRejectedValue(new Error('provider unavailable'));
+    deps.disbursements.initiateTransfer.mockRejectedValue(new Error('provider timeout after request')); 
+    deps.disbursements.getTransferStatus.mockRejectedValue(new Error('status endpoint unavailable'));
     const service = new RefundService(prisma, deps.disbursements, deps.journal);
 
     await expect(service.executeRefund('refund-1', 'operator-1', [RoleName.ACCOUNTANT]))
       .rejects.toBeInstanceOf(ServiceUnavailableException);
+
+    expect(deps.disbursements.getTransferStatus).toHaveBeenCalledWith('bci-refund-refund-1');
+    expect(prisma.refund.updateMany).toHaveBeenCalledTimes(1);
+    expect(prisma.refund.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'refund-1', status: PaymentStatus.PENDING, approvedBy: { not: null } },
+      data: { status: PaymentStatus.PROCESSING },
+    }));
+  });
+
+  it('marks a refund failed only when provider status confirms failure after an initiation error', async () => {
+    const prisma = mockPrisma();
+    const deps = mockDeps();
+    prisma.$transaction.mockImplementation(async (callback: (client: any) => unknown) => callback(prisma));
+    prisma.refund.findUnique.mockResolvedValue({
+      id: 'refund-1', status: PaymentStatus.PENDING, approvedBy: 'approver-1',
+      amount: new Prisma.Decimal('25.00'),
+      payment: { id: 'payment-1', status: PaymentStatus.SUCCEEDED, amount: new Prisma.Decimal('25.00'), purpose: PaymentPurpose.FEE, guardianId: 'guardian-1' },
+    });
+    prisma.refund.updateMany.mockResolvedValue({ count: 1 });
+    prisma.person.findUnique.mockResolvedValue({ phone: '0240000000' });
+    deps.disbursements.initiateTransfer.mockRejectedValue(new Error('provider timeout after request'));
+    deps.disbursements.getTransferStatus.mockResolvedValue({ providerReference: 'moolre-ref-1', status: 'FAILED', mock: false });
+    prisma.auditLog.create.mockResolvedValue({});
+    prisma.refund.findUnique.mockResolvedValueOnce({
+      id: 'refund-1', status: PaymentStatus.PENDING, approvedBy: 'approver-1',
+      amount: new Prisma.Decimal('25.00'),
+      payment: { id: 'payment-1', status: PaymentStatus.SUCCEEDED, amount: new Prisma.Decimal('25.00'), purpose: PaymentPurpose.FEE, guardianId: 'guardian-1' },
+    }).mockResolvedValueOnce({ id: 'refund-1', status: PaymentStatus.FAILED });
+    const service = new RefundService(prisma, deps.disbursements, deps.journal);
+
+    const result = await service.executeRefund('refund-1', 'operator-1', [RoleName.ACCOUNTANT]);
+
+    expect(result?.status).toBe(PaymentStatus.FAILED);
     expect(prisma.refund.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 'refund-1', status: PaymentStatus.PROCESSING },
       data: { status: PaymentStatus.FAILED },
