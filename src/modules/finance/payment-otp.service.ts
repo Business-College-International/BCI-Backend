@@ -204,51 +204,83 @@ export class PaymentOtpService {
       network: reservation.network,
     };
 
-    try {
-      await this.prisma.$transaction(async (tx) => {
-        await tx.payment.update({
-          where: { id: reservation.payment.id },
-          data: {
-            status: PaymentStatus.PROCESSING,
-            provider: this.moolre.provider,
-            providerReference: providerResult.providerReference ?? reservation.payment.providerReference,
-          },
-        });
-        await tx.paymentProviderAttempt.update({
-          where: { id: reservation.attemptId },
-          data: {
-            status: PaymentStatus.PROCESSING,
-            providerReference: providerResult.providerReference,
-            responsePayload: response,
-            resolvedAt: providerResult.requiresOtp ? null : new Date(),
-          },
-        });
-        await tx.auditLog.create({
-          data: {
-            actorUserId,
-            action: 'UPDATE',
-            entityType: 'Payment',
-            entityId: reservation.payment.id,
-            afterJson: {
-              status: PaymentStatus.PROCESSING,
-              otpContinuation: true,
-              requiresOtp: providerResult.requiresOtp,
-              providerReference: providerResult.providerReference,
-            },
-          },
-        });
-        await tx.idempotencyKey.update({
-          where: { userId_key_operation: { userId: actorUserId, key: idempotencyKey.trim(), operation: 'payments.otp' } },
-          data: {
-            responseJson: response,
-            statusCode: 202,
-            completedAt: new Date(),
-          },
-        });
+    const persistAcceptedResult = async () => this.prisma.$transaction(async (tx) => {
+      await tx.payment.updateMany({
+        where: { id: reservation.payment.id, status: { in: [PaymentStatus.PENDING, PaymentStatus.PROCESSING] } },
+        data: {
+          status: PaymentStatus.PROCESSING,
+          provider: this.moolre.provider,
+          providerReference: providerResult.providerReference ?? reservation.payment.providerReference,
+        },
       });
+      await tx.paymentProviderAttempt.updateMany({
+        where: { id: reservation.attemptId, status: { in: [PaymentStatus.PENDING, PaymentStatus.PROCESSING] } },
+        data: {
+          status: PaymentStatus.PROCESSING,
+          providerReference: providerResult.providerReference,
+          responsePayload: response,
+          resolvedAt: providerResult.requiresOtp ? null : new Date(),
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          actorUserId,
+          action: 'UPDATE',
+          entityType: 'Payment',
+          entityId: reservation.payment.id,
+          afterJson: {
+            status: PaymentStatus.PROCESSING,
+            otpContinuation: true,
+            requiresOtp: providerResult.requiresOtp,
+            providerReference: providerResult.providerReference,
+          },
+        },
+      });
+      await tx.idempotencyKey.update({
+        where: { userId_key_operation: { userId: actorUserId, key: idempotencyKey.trim(), operation: 'payments.otp' } },
+        data: {
+          responseJson: response,
+          statusCode: 202,
+          completedAt: new Date(),
+        },
+      });
+    });
+
+    try {
+      await persistAcceptedResult();
       return response;
     } catch {
-      throw new ConflictException('OTP was accepted by the provider, but local state could not be persisted. Reconcile the payment before retrying.');
+      try {
+        await persistAcceptedResult();
+        return response;
+      } catch {
+        try {
+          await this.prisma.$transaction(async (tx) => {
+            await tx.payment.updateMany({
+              where: { id: reservation.payment.id, status: { in: [PaymentStatus.PENDING, PaymentStatus.PROCESSING] } },
+              data: {
+                status: PaymentStatus.PROCESSING,
+                provider: this.moolre.provider,
+                providerReference: providerResult.providerReference ?? reservation.payment.providerReference,
+              },
+            });
+            await tx.paymentProviderAttempt.updateMany({
+              where: { id: reservation.attemptId, status: { in: [PaymentStatus.PENDING, PaymentStatus.PROCESSING] } },
+              data: {
+                status: PaymentStatus.PROCESSING,
+                providerReference: providerResult.providerReference,
+                resolvedAt: null,
+                failureCode: 'OTP_LOCAL_PERSISTENCE_UNKNOWN',
+                failureMessage: 'Provider accepted the OTP, but local settlement state is unknown; reconcile before retrying.',
+                responsePayload: { ...response, otpOutcomeUnknown: true },
+              },
+            });
+          });
+        } catch {
+          // Best-effort safety marker; the provider result is already known to have been accepted.
+        }
+        throw new ConflictException('OTP was accepted by the provider, but local state could not be persisted. Reconcile the payment before retrying.');
+      }
     }
   }
 
