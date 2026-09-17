@@ -53,6 +53,32 @@ describe('PaymentWebhookProcessor', () => {
     expect(invoiceUpdate).toHaveBeenCalledWith({ where: { id: 'invoice-1' }, data: { status: InvoiceStatus.PAID } });
   });
 
+  it('requires both webhook references to identify the same payment when both are supplied', async () => {
+    let lookup: unknown;
+    const prisma = {
+      $transaction: jest.fn(async (callback: (tx: any) => unknown) => callback({
+        payment: {
+          findFirst: jest.fn().mockImplementation(async ({ where }) => {
+            lookup = where;
+            return null;
+          }),
+        },
+        providerWebhookEvent: {
+          findUnique: jest.fn().mockResolvedValue({ id: 'event-1', processedAt: null }),
+          update: jest.fn().mockResolvedValue({}),
+        },
+      })),
+    };
+
+    const processor = new PaymentWebhookProcessor(prisma as any);
+    await expect(processor.apply(normalized, 'event-1')).resolves.toMatchObject({ applied: false, reason: 'payment-not-found' });
+    expect(lookup).toEqual({
+      provider: 'TEST',
+      providerReference: 'provider-ref-1',
+      clientReference: 'client-ref-1',
+    });
+  });
+
   it('ignores an event that was already processed', async () => {
     const event = { id: 'event-1', processedAt: new Date() };
     const prisma = {
