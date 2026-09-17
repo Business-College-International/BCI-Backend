@@ -100,101 +100,112 @@ export class FinanceService {
   }
 
   async issueInvoice(dto: IssueInvoiceDto, actorUserId: string) {
-    return this.prisma.$transaction(async (tx) => {
-      const [student, term, schedules] = await Promise.all([
-        tx.student.findUnique({
-          where: { id: dto.studentId },
-          include: {
-            enrolments: {
-              where: { termId: dto.termId, status: 'ACTIVE' },
-              take: 1,
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const [student, term, schedules] = await Promise.all([
+          tx.student.findUnique({
+            where: { id: dto.studentId },
+            include: {
+              enrolments: {
+                where: { termId: dto.termId, status: 'ACTIVE' },
+                take: 1,
+              },
+            },
+          }),
+          tx.term.findUnique({ where: { id: dto.termId } }),
+          tx.feeSchedule.findMany({
+            where: { id: { in: dto.feeScheduleIds }, isActive: true },
+          }),
+        ]);
+
+        if (!student) throw new NotFoundException('Student not found.');
+        if (!term) throw new NotFoundException('Term not found.');
+        if (student.status !== 'ACTIVE') {
+          throw new BadRequestException('Only active students can receive new invoices.');
+        }
+        if (term.status === 'CLOSED') {
+          throw new BadRequestException('Invoices cannot be issued for a closed term.');
+        }
+
+        const enrolment = student.enrolments[0];
+        if (!enrolment) {
+          throw new BadRequestException('Student has no active enrolment for the selected term.');
+        }
+        if (schedules.length !== new Set(dto.feeScheduleIds).size) {
+          throw new BadRequestException('Fee schedule identifiers must be unique.');
+        }
+        if (schedules.length !== dto.feeScheduleIds.length) {
+          throw new BadRequestException('One or more selected fee items are unavailable.');
+        }
+
+        for (const schedule of schedules) {
+          if (
+            schedule.termId !== dto.termId ||
+            schedule.level !== enrolment.level ||
+            schedule.programme !== enrolment.programme
+          ) {
+            throw new BadRequestException('A selected fee item does not match the student enrolment.');
+          }
+        }
+
+        const existingOpen = await tx.studentInvoice.findFirst({
+          where: {
+            studentId: dto.studentId,
+            termId: dto.termId,
+            status: { in: [InvoiceStatus.OPEN, InvoiceStatus.PARTIALLY_PAID] },
+          },
+          select: { id: true },
+        });
+        if (existingOpen) {
+          throw new ConflictException('An open invoice already exists for this student and term.');
+        }
+
+        const invoiceNumber = this.nextInvoiceNumber();
+        const invoice = await tx.studentInvoice.create({
+          data: {
+            studentId: dto.studentId,
+            termId: dto.termId,
+            invoiceNumber,
+            dueAt: dto.dueAt ? new Date(dto.dueAt) : undefined,
+            notes: dto.notes?.trim(),
+            lines: {
+              create: schedules.map((schedule) => ({
+                feeScheduleId: schedule.id,
+                description: schedule.itemName,
+                amountDue: schedule.amount,
+              })),
             },
           },
-        }),
-        tx.term.findUnique({ where: { id: dto.termId } }),
-        tx.feeSchedule.findMany({
-          where: { id: { in: dto.feeScheduleIds }, isActive: true },
-        }),
-      ]);
+          include: { lines: true },
+        });
 
-      if (!student) throw new NotFoundException('Student not found.');
-      if (!term) throw new NotFoundException('Term not found.');
-      if (student.status !== 'ACTIVE') {
-        throw new BadRequestException('Only active students can receive new invoices.');
-      }
-      if (term.status === 'CLOSED') {
-        throw new BadRequestException('Invoices cannot be issued for a closed term.');
-      }
-
-      const enrolment = student.enrolments[0];
-      if (!enrolment) {
-        throw new BadRequestException('Student has no active enrolment for the selected term.');
-      }
-      if (schedules.length !== new Set(dto.feeScheduleIds).size) {
-        throw new BadRequestException('Fee schedule identifiers must be unique.');
-      }
-      if (schedules.length !== dto.feeScheduleIds.length) {
-        throw new BadRequestException('One or more selected fee items are unavailable.');
-      }
-
-      for (const schedule of schedules) {
-        if (
-          schedule.termId !== dto.termId ||
-          schedule.level !== enrolment.level ||
-          schedule.programme !== enrolment.programme
-        ) {
-          throw new BadRequestException('A selected fee item does not match the student enrolment.');
-        }
-      }
-
-      const existingOpen = await tx.studentInvoice.findFirst({
-        where: {
-          studentId: dto.studentId,
-          termId: dto.termId,
-          status: { in: [InvoiceStatus.OPEN, InvoiceStatus.PARTIALLY_PAID] },
-        },
-        select: { id: true },
-      });
-      if (existingOpen) {
-        throw new ConflictException('An open invoice already exists for this student and term.');
-      }
-
-      const invoiceNumber = this.nextInvoiceNumber();
-      const invoice = await tx.studentInvoice.create({
-        data: {
-          studentId: dto.studentId,
-          termId: dto.termId,
-          invoiceNumber,
-          dueAt: dto.dueAt ? new Date(dto.dueAt) : undefined,
-          notes: dto.notes?.trim(),
-          lines: {
-            create: schedules.map((schedule) => ({
-              feeScheduleId: schedule.id,
-              description: schedule.itemName,
-              amountDue: schedule.amount,
-            })),
+        await tx.auditLog.create({
+          data: {
+            actorUserId,
+            action: 'CREATE',
+            entityType: 'StudentInvoice',
+            entityId: invoice.id,
+            afterJson: {
+              studentId: invoice.studentId,
+              termId: invoice.termId,
+              invoiceNumber: invoice.invoiceNumber,
+              lineCount: invoice.lines.length,
+            },
           },
-        },
-        include: { lines: true },
-      });
+        });
 
-      await tx.auditLog.create({
-        data: {
-          actorUserId,
-          action: 'CREATE',
-          entityType: 'StudentInvoice',
-          entityId: invoice.id,
-          afterJson: {
-            studentId: invoice.studentId,
-            termId: invoice.termId,
-            invoiceNumber: invoice.invoiceNumber,
-            lineCount: invoice.lines.length,
-          },
-        },
+        return this.toInvoiceView(invoice, []);
+      }, {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        maxWait: 5000,
+        timeout: 10000,
       });
-
-      return this.toInvoiceView(invoice, []);
-    });
+    } catch (error) {
+      if ((error as { code?: string }).code === 'P2034') {
+        throw new ConflictException('Invoice issuance conflicted with another invoice change. Please retry.');
+      }
+      throw error;
+    }
   }
 
   async listStudentInvoices(studentId: string, actorUserId: string, roles: RoleName[]) {

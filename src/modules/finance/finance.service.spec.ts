@@ -24,7 +24,7 @@ describe('FinanceService', () => {
       feeSchedule: { findMany: jest.fn() },
       studentInvoice: { findFirst: jest.fn() },
     };
-    prisma.$transaction.mockImplementation(async (callback: (client: typeof tx) => unknown) => callback(tx));
+    prisma.$transaction.mockImplementation(async (callback: (client: typeof tx) => unknown, options?: unknown) => callback(tx));
     tx.student.findUnique.mockResolvedValue({
       status: 'ACTIVE',
       enrolments: [{ level: 'SHS1', programme: 'BUSINESS' }],
@@ -62,6 +62,64 @@ describe('FinanceService', () => {
     ]);
     tx.studentInvoice.findFirst.mockResolvedValue({ id: 'invoice-existing', status: InvoiceStatus.OPEN });
 
+    const service = new FinanceService(prisma);
+
+    await expect(service.issueInvoice({
+      studentId: 'student-1',
+      termId: 'term-1',
+      feeScheduleIds: ['fee-1'],
+    }, 'accountant-1')).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('uses serializable isolation when issuing an invoice', async () => {
+    const prisma = mockPrisma();
+    const tx = {
+      student: { findUnique: jest.fn() },
+      term: { findUnique: jest.fn() },
+      feeSchedule: { findMany: jest.fn() },
+      studentInvoice: { findFirst: jest.fn(), create: jest.fn() },
+      auditLog: { create: jest.fn() },
+    };
+    prisma.$transaction.mockImplementation(async (callback: (client: typeof tx) => unknown, options: unknown) => {
+      expect(options).toEqual(expect.objectContaining({
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      }));
+      return callback(tx);
+    });
+    tx.student.findUnique.mockResolvedValue({
+      id: 'student-1',
+      status: 'ACTIVE',
+      enrolments: [{ level: 'SHS1', programme: 'BUSINESS' }],
+    });
+    tx.term.findUnique.mockResolvedValue({ status: 'OPEN' });
+    tx.feeSchedule.findMany.mockResolvedValue([
+      { id: 'fee-1', termId: 'term-1', level: 'SHS1', programme: 'BUSINESS', amount: new Prisma.Decimal('100.00'), itemName: 'Test' },
+    ]);
+    tx.studentInvoice.findFirst.mockResolvedValue(null);
+    tx.studentInvoice.create.mockResolvedValue({
+      id: 'invoice-1',
+      studentId: 'student-1',
+      termId: 'term-1',
+      invoiceNumber: 'BCI-2026-TEST',
+      status: InvoiceStatus.OPEN,
+      issuedAt: new Date('2026-09-17'),
+      dueAt: null,
+      notes: null,
+      lines: [{ id: 'line-1', description: 'Test', amountDue: new Prisma.Decimal('100.00') }],
+    });
+    tx.auditLog.create.mockResolvedValue({});
+
+    const service = new FinanceService(prisma);
+    await service.issueInvoice({
+      studentId: 'student-1',
+      termId: 'term-1',
+      feeScheduleIds: ['fee-1'],
+    }, 'accountant-1');
+  });
+
+  it('translates an invoice issuance serialization conflict into a retryable conflict', async () => {
+    const prisma = mockPrisma();
+    prisma.$transaction.mockRejectedValue({ code: 'P2034' });
     const service = new FinanceService(prisma);
 
     await expect(service.issueInvoice({
