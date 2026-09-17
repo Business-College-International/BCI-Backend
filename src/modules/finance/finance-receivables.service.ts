@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { InvoiceStatus, Prisma, RoleName } from '@prisma/client';
+import { InvoiceStatus, PaymentStatus, Prisma, RoleName } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
 import { ListInvoicesDto } from './dto/list-invoices.dto';
 import { VoidInvoiceDto } from './dto/void-invoice.dto';
@@ -42,7 +42,9 @@ export class FinanceReceivablesService {
 
     return invoices.map((invoice) => {
       const due = invoice.lines.reduce((sum, line) => sum.plus(line.amountDue), new Prisma.Decimal(0));
-      const allocated = invoice.allocations.reduce((sum, allocation) => sum.plus(allocation.amount), new Prisma.Decimal(0));
+      const allocated = invoice.allocations
+        .filter((allocation) => allocation.payment.status === PaymentStatus.SUCCEEDED)
+        .reduce((sum, allocation) => sum.plus(allocation.amount), new Prisma.Decimal(0));
       return {
         id: invoice.id,
         invoiceNumber: invoice.invoiceNumber,
@@ -61,14 +63,11 @@ export class FinanceReceivablesService {
   async voidInvoice(invoiceId: string, dto: VoidInvoiceDto, actorUserId: string, roles: RoleName[]) {
     this.assertManagementScope(roles, actorUserId);
     return this.prisma.$transaction(async (tx) => {
-      const invoice = await tx.studentInvoice.findUnique({
-        where: { id: invoiceId },
-        include: { allocations: true },
-      });
+      const invoice = await tx.studentInvoice.findUnique({ where: { id: invoiceId }, include: { allocations: true } });
       if (!invoice) throw new NotFoundException('Invoice not found.');
       if (invoice.status === InvoiceStatus.VOID) throw new ConflictException('Invoice is already void.');
       if (invoice.status === InvoiceStatus.PAID || invoice.allocations.length > 0) {
-        throw new BadRequestException('Invoices with allocated payments cannot be voided. Use the payment/refund workflow instead.');
+        throw new BadRequestException('Invoices with payments or active reservations cannot be voided. Use the payment/refund workflow instead.');
       }
 
       const updated = await tx.studentInvoice.update({ where: { id: invoiceId }, data: { status: InvoiceStatus.VOID } });
@@ -90,7 +89,7 @@ export class FinanceReceivablesService {
     this.assertManagementScope(roles, actorUserId);
     const invoices = await this.prisma.studentInvoice.findMany({
       where: { status: { in: [InvoiceStatus.OPEN, InvoiceStatus.PARTIALLY_PAID] } },
-      include: { lines: true, allocations: true, student: { select: { id: true, admissionNumber: true, firstName: true, lastName: true } } },
+      include: { lines: true, allocations: { include: { payment: { select: { status: true } } } }, student: { select: { id: true, admissionNumber: true, firstName: true, lastName: true } } },
     });
 
     const buckets = { current: new Prisma.Decimal(0), days1to30: new Prisma.Decimal(0), days31to60: new Prisma.Decimal(0), days61to90: new Prisma.Decimal(0), over90: new Prisma.Decimal(0) };
@@ -98,7 +97,9 @@ export class FinanceReceivablesService {
 
     for (const invoice of invoices) {
       const due = invoice.lines.reduce((sum, line) => sum.plus(line.amountDue), new Prisma.Decimal(0));
-      const allocated = invoice.allocations.reduce((sum, allocation) => sum.plus(allocation.amount), new Prisma.Decimal(0));
+      const allocated = invoice.allocations
+        .filter((allocation) => allocation.payment.status === PaymentStatus.SUCCEEDED)
+        .reduce((sum, allocation) => sum.plus(allocation.amount), new Prisma.Decimal(0));
       const outstanding = due.minus(allocated);
       if (outstanding.lte(0)) continue;
       const ageDays = invoice.dueAt ? Math.max(0, Math.floor((asOf.getTime() - invoice.dueAt.getTime()) / 86_400_000)) : 0;
@@ -126,8 +127,6 @@ export class FinanceReceivablesService {
   }
 
   private assertManagementScope(roles: RoleName[], actorUserId: string) {
-    if (!roles.some((role) => FINANCE_MANAGEMENT_ROLES.has(role))) {
-      throw new ForbiddenException(`Finance management access is restricted for user ${actorUserId}.`);
-    }
+    if (!roles.some((role) => FINANCE_MANAGEMENT_ROLES.has(role))) throw new ForbiddenException(`Finance management access is restricted for user ${actorUserId}.`);
   }
 }
