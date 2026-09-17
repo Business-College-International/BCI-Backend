@@ -114,9 +114,12 @@ export class AssessmentsService {
     return this.prisma.$transaction(async (tx) => {
       const assessment = await tx.assessment.findUnique({
         where: { id: assessmentId },
-        select: { id: true, termId: true, subjectId: true, maxScore: true },
+        select: { id: true, termId: true, subjectId: true, maxScore: true, term: { select: { status: true } } },
       });
       if (!assessment) throw new NotFoundException('Assessment not found.');
+      if (assessment.term.status === 'CLOSED') {
+        throw new BadRequestException('Assessment results cannot be entered or changed for a closed term.');
+      }
 
       await this.assertTeacherAssignment(tx, actorUserId, roles, assessment.termId, assessment.subjectId);
 
