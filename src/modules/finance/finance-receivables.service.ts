@@ -43,6 +43,7 @@ export class FinanceReceivablesService {
     return invoices.map((invoice) => {
       const due = invoice.lines.reduce((sum, line) => sum.plus(line.amountDue), new Prisma.Decimal(0));
       const allocated = invoice.allocations.reduce((sum, allocation) => {
+        if (allocation.payment.status !== PaymentStatus.SUCCEEDED && allocation.payment.status !== PaymentStatus.REFUNDED) return sum;
         const refunded = allocation.payment.refunds
           .filter((refund) => refund.status === PaymentStatus.SUCCEEDED)
           .reduce((refundSum, refund) => refundSum.plus(refund.amount), new Prisma.Decimal(0));
@@ -119,7 +120,7 @@ export class FinanceReceivablesService {
       where: { status: { in: [InvoiceStatus.OPEN, InvoiceStatus.PARTIALLY_PAID] } },
       include: {
         lines: true,
-        allocations: { include: { payment: { select: { refunds: { select: { amount: true, status: true } } } } } },
+        allocations: { include: { payment: { select: { status: true, refunds: { select: { amount: true, status: true } } } } } },
         student: { select: { id: true, admissionNumber: true, firstName: true, lastName: true } },
       },
     });
@@ -130,6 +131,7 @@ export class FinanceReceivablesService {
     for (const invoice of invoices) {
       const due = invoice.lines.reduce((sum, line) => sum.plus(line.amountDue), new Prisma.Decimal(0));
       const allocated = invoice.allocations.reduce((sum, allocation) => {
+        if (allocation.payment.status !== PaymentStatus.SUCCEEDED && allocation.payment.status !== PaymentStatus.REFUNDED) return sum;
         const refunded = allocation.payment.refunds
           .filter((refund) => refund.status === PaymentStatus.SUCCEEDED)
           .reduce((refundSum, refund) => refundSum.plus(refund.amount), new Prisma.Decimal(0));
