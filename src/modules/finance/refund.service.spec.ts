@@ -1,5 +1,5 @@
 import { ConflictException, ForbiddenException, ServiceUnavailableException } from '@nestjs/common';
-import { PaymentPurpose, PaymentStatus, Prisma, RoleName } from '@prisma/client';
+import { InvoiceStatus, PaymentPurpose, PaymentStatus, Prisma, RoleName } from '@prisma/client';
 import { RefundService } from './refund.service';
 
 function mockPrisma() {
@@ -25,6 +25,35 @@ function mockDeps() {
       recordBalancedEntry: jest.fn(),
     },
   } as any;
+}
+
+function makeProcessingRefund(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'refund-1',
+    status: PaymentStatus.PROCESSING,
+    approvedBy: 'approver-1',
+    amount: new Prisma.Decimal('40.00'),
+    providerReference: 'moolre-ref-1',
+    paymentId: 'payment-1',
+    payment: {
+      id: 'payment-1',
+      status: PaymentStatus.SUCCEEDED,
+      amount: new Prisma.Decimal('100.00'),
+      currency: 'GHS',
+      purpose: PaymentPurpose.FEE,
+      refunds: [{ id: 'refund-1', amount: new Prisma.Decimal('40.00'), status: PaymentStatus.PROCESSING }],
+      allocations: [{
+        invoiceId: 'invoice-1',
+        amount: new Prisma.Decimal('100.00'),
+        invoice: {
+          id: 'invoice-1',
+          status: InvoiceStatus.PAID,
+          lines: [{ amountDue: new Prisma.Decimal('100.00') }],
+        },
+      }],
+    },
+    ...overrides,
+  };
 }
 
 describe('RefundService', () => {
@@ -164,26 +193,44 @@ describe('RefundService', () => {
     }));
   });
 
+  it('does not mark a provider-accepted refund failed when local settlement fails', async () => {
+    const prisma = mockPrisma();
+    const deps = mockDeps();
+    prisma.$transaction.mockImplementation(async (callback: (client: any) => unknown) => callback(prisma));
+    prisma.refund.findUnique.mockResolvedValueOnce({
+      id: 'refund-1', status: PaymentStatus.PENDING, approvedBy: 'approver-1', amount: new Prisma.Decimal('40.00'), paymentId: 'payment-1',
+      payment: { id: 'payment-1', status: PaymentStatus.SUCCEEDED, amount: new Prisma.Decimal('100.00'), purpose: PaymentPurpose.FEE, guardianId: 'guardian-1' },
+    }).mockResolvedValueOnce({ id: 'refund-1', status: PaymentStatus.PROCESSING });
+    prisma.refund.updateMany.mockResolvedValue({ count: 1 });
+    prisma.person.findUnique.mockResolvedValue({ phone: '0240000000' });
+    deps.disbursements.initiateTransfer.mockResolvedValue({ providerReference: 'moolre-ref-1', status: 'SUCCESSFUL', mock: true });
+    prisma.studentInvoice.findUnique.mockRejectedValue(new Error('database unavailable'));
+
+    const service = new RefundService(prisma, deps.disbursements, deps.journal);
+    await expect(service.executeRefund('refund-1', 'operator-1', [RoleName.ACCOUNTANT]))
+      .rejects.toThrow('database unavailable');
+
+    expect(prisma.refund.updateMany).toHaveBeenCalledTimes(1);
+    expect(prisma.refund.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'refund-1', status: PaymentStatus.PENDING, approvedBy: { not: null } },
+      data: { status: PaymentStatus.PROCESSING },
+    }));
+  });
+
   it('settles a successful refund, reopens the invoice, and records a reversal journal', async () => {
     const prisma = mockPrisma();
     const deps = mockDeps();
     prisma.$transaction.mockImplementation(async (callback: (client: any) => unknown) => callback(prisma));
-    prisma.refund.findUnique.mockResolvedValue({
-      id: 'refund-1', status: PaymentStatus.PROCESSING, approvedBy: 'approver-1',
-      amount: new Prisma.Decimal('40.00'), providerReference: 'moolre-ref-1',
-      paymentId: 'payment-1',
-      payment: {
-        id: 'payment-1', status: PaymentStatus.SUCCEEDED, amount: new Prisma.Decimal('100.00'), currency: 'GHS', purpose: PaymentPurpose.FEE,
-        refunds: [{ id: 'refund-1', amount: new Prisma.Decimal('40.00'), status: PaymentStatus.PROCESSING }],
-        allocations: [{ invoiceId: 'invoice-1', amount: new Prisma.Decimal('100.00'), invoice: {
-          id: 'invoice-1', status: 'PAID', lines: [{ amountDue: new Prisma.Decimal('100.00') }],
-        } }],
-      },
-    });
+    const processingRefund = makeProcessingRefund();
+    const settlementRefund = makeProcessingRefund();
+    prisma.refund.findUnique
+      .mockResolvedValueOnce(processingRefund)
+      .mockResolvedValueOnce(settlementRefund)
+      .mockResolvedValueOnce({ id: 'refund-1', status: PaymentStatus.SUCCEEDED });
     prisma.refund.update.mockResolvedValue({ id: 'refund-1', status: PaymentStatus.SUCCEEDED });
     prisma.studentInvoice.findUnique.mockResolvedValue({
       id: 'invoice-1',
-      status: 'PAID',
+      status: InvoiceStatus.PAID,
       lines: [{ amountDue: new Prisma.Decimal('100.00') }],
       allocations: [{
         amount: new Prisma.Decimal('100.00'),
@@ -193,18 +240,9 @@ describe('RefundService', () => {
         },
       }],
     });
-    prisma.studentInvoice.update.mockResolvedValue({ id: 'invoice-1', status: 'PARTIALLY_PAID' });
-    deps.journal.recordBalancedEntry.mockResolvedValue([]);
+    prisma.studentInvoice.update.mockResolvedValue({ id: 'invoice-1', status: InvoiceStatus.PARTIALLY_PAID });
     prisma.auditLog.create.mockResolvedValue({});
-    prisma.refund.findUnique.mockResolvedValueOnce({
-      id: 'refund-1', status: PaymentStatus.PROCESSING, approvedBy: 'approver-1', amount: new Prisma.Decimal('40.00'), paymentId: 'payment-1',
-      payment: {
-        id: 'payment-1', status: PaymentStatus.SUCCEEDED, amount: new Prisma.Decimal('100.00'), currency: 'GHS', purpose: PaymentPurpose.FEE,
-        refunds: [{ id: 'refund-1', amount: new Prisma.Decimal('40.00'), status: PaymentStatus.PROCESSING }],
-        allocations: [{ invoiceId: 'invoice-1', amount: new Prisma.Decimal('100.00'), invoice: { id: 'invoice-1', status: 'PAID', lines: [{ amountDue: new Prisma.Decimal('100.00') }] } }],
-      },
-    });
-    prisma.refund.findUnique.mockResolvedValueOnce({ id: 'refund-1', status: PaymentStatus.SUCCEEDED });
+    deps.journal.recordBalancedEntry.mockResolvedValue([]);
 
     const service = new RefundService(prisma, deps.disbursements, deps.journal);
     const result = await service.reconcileRefund('refund-1', 'operator-1', [RoleName.ACCOUNTANT]);
@@ -212,7 +250,7 @@ describe('RefundService', () => {
     expect(result?.status).toBe(PaymentStatus.SUCCEEDED);
     expect(prisma.studentInvoice.update).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 'invoice-1' },
-      data: { status: 'PARTIALLY_PAID' },
+      data: { status: InvoiceStatus.PARTIALLY_PAID },
     }));
     expect(deps.journal.recordBalancedEntry).toHaveBeenCalledWith(expect.arrayContaining([
       expect.objectContaining({ direction: 'DEBIT', accountCode: 'FEES', amount: '40.00' }),
