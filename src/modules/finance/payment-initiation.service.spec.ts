@@ -23,6 +23,7 @@ function makeService() {
     idempotencyKey: { findUnique: jest.fn().mockResolvedValue(null), create: jest.fn().mockResolvedValue({}) },
     guardian: { findUnique: jest.fn().mockResolvedValue({ personId: 'guardian-1' }) },
     guardianStudent: { findUnique: jest.fn().mockResolvedValue({ canPayFees: true }) },
+    person: { findUnique: jest.fn().mockResolvedValue({ id: 'guardian-1', firstName: 'Grace', lastName: 'Guardian', phone: '0244000000' }) },
     $executeRaw: jest.fn().mockResolvedValue([]),
     studentInvoice: {
       findMany: jest.fn().mockResolvedValue([{
