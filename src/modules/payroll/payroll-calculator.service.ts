@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PayrollPeriodStatus, Prisma, RoleName } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
 import { calculateCompensation } from './payroll-calculator';
@@ -71,7 +71,7 @@ export class PayrollCalculatorService {
       });
     } catch (error) {
       if ((error as { code?: string }).code === 'P2034') {
-        throw new ForbiddenException('Payroll period changed concurrently. Please retry the calculation.');
+        throw new ConflictException('Payroll period changed concurrently. Please retry the calculation.');
       }
       throw error;
     }
@@ -139,7 +139,7 @@ export class PayrollCalculatorService {
       });
     } catch (error) {
       if ((error as { code?: string }).code === 'P2034') {
-        throw new ForbiddenException('Payroll period changed concurrently. Please retry the approval.');
+        throw new ConflictException('Payroll period changed concurrently. Please retry the approval.');
       }
       throw error;
     }
