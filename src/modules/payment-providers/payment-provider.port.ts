@@ -12,6 +12,21 @@ export type VerifiedProviderWebhook = ProviderWebhook & {
   signatureVerified: true;
 };
 
+export type InitiatePaymentInput = {
+  clientReference: string;
+  amount: string;
+  currency: string;
+  purpose: string;
+  callbackUrl: string;
+  customer: { name: string; phone: string; network?: string };
+};
+
+export type InitiatePaymentResult = {
+  providerReference: string | null;
+  requiresOtp: boolean;
+  mock: boolean;
+};
+
 export interface PaymentProviderPort {
   readonly provider: string;
 
@@ -19,12 +34,5 @@ export interface PaymentProviderPort {
 
   normalizeWebhook(input: VerifiedProviderWebhook): NormalizedPaymentWebhook;
 
-  initiatePayment(input: {
-    clientReference: string;
-    amount: string;
-    currency: string;
-    purpose: string;
-    callbackUrl: string;
-    customer: { name: string; phone: string };
-  }): Promise<never>;
+  initiatePayment(input: InitiatePaymentInput): Promise<InitiatePaymentResult>;
 }
