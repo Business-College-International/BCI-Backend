@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { InvoiceStatus, PaymentStatus } from '@prisma/client';
+import { InvoiceStatus, PaymentStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
 import { NormalizedPaymentWebhook } from './payment-webhook.normalization';
 
@@ -30,22 +30,14 @@ export class PaymentWebhookProcessor {
         },
         include: { attempts: true, allocations: { select: { id: true, invoiceId: true, amount: true } } },
       });
-
-      const event = await tx.providerWebhookEvent.findUnique({
-        where: { provider_eventId: { provider: normalized.provider, eventId } },
-      });
+      const event = await tx.providerWebhookEvent.findUnique({ where: { provider_eventId: { provider: normalized.provider, eventId } } });
       if (!event) throw new NotFoundException('Provider webhook event was not recorded.');
-
       if (event.processedAt) return { applied: false, reason: 'duplicate-processed-event' as const, paymentId: payment?.id ?? null };
 
       if (!payment) {
-        await tx.providerWebhookEvent.update({
-          where: { id: event.id },
-          data: { processedAt: new Date(), processingError: 'No matching payment record was found.' },
-        });
+        await this.markEventError(tx, event.id, 'No matching payment record was found.');
         return { applied: false, reason: 'payment-not-found' as const };
       }
-
       if (normalized.amount !== null && normalized.amount !== payment.amount.toFixed(2)) {
         await this.markEventError(tx, event.id, 'Provider payment amount does not match the payment record.');
         return { applied: false, reason: 'amount-mismatch' as const };
@@ -54,7 +46,6 @@ export class PaymentWebhookProcessor {
         await this.markEventError(tx, event.id, 'Provider payment currency does not match the payment record.');
         return { applied: false, reason: 'currency-mismatch' as const };
       }
-
       if (TERMINAL_STATUSES.has(payment.status) && payment.status !== normalized.paymentStatus) {
         await this.markEventError(tx, event.id, `Terminal payment status ${payment.status} cannot move to ${normalized.paymentStatus}.`);
         return { applied: false, reason: 'terminal-status-protected' as const };
@@ -72,9 +63,7 @@ export class PaymentWebhookProcessor {
       });
 
       const attempt = payment.attempts.find(
-        (candidate) =>
-          candidate.provider === normalized.provider &&
-          (candidate.providerReference === normalized.providerReference || candidate.providerReference == null),
+        (candidate) => candidate.provider === normalized.provider && (candidate.providerReference === normalized.providerReference || candidate.providerReference == null),
       );
       if (attempt) {
         await tx.paymentProviderAttempt.update({
@@ -95,7 +84,7 @@ export class PaymentWebhookProcessor {
         await tx.paymentAllocation.deleteMany({ where: { paymentId: payment.id } });
         await this.refreshInvoiceStatuses(tx, payment.allocations.map((allocation) => allocation.invoiceId));
       } else if (ACTIVE_ALLOCATION_STATUSES.has(normalized.paymentStatus)) {
-        // PENDING/PROCESSING retains the reservation so another payment cannot claim the same balance.
+        // Pending/processing retains the reservation.
       }
 
       await tx.providerWebhookEvent.update({ where: { id: event.id }, data: { processedAt: new Date(), processingError: null } });
@@ -108,10 +97,7 @@ export class PaymentWebhookProcessor {
     for (const invoiceId of ids) {
       const invoice = await tx.studentInvoice.findUnique({
         where: { id: invoiceId },
-        include: {
-          lines: true,
-          allocations: { include: { payment: { select: { status: true } } } },
-        },
+        include: { lines: true, allocations: { include: { payment: { select: { status: true } } } } },
       });
       if (!invoice || invoice.status === InvoiceStatus.VOID) continue;
 
@@ -124,10 +110,7 @@ export class PaymentWebhookProcessor {
         : allocated.gt(0)
           ? InvoiceStatus.PARTIALLY_PAID
           : InvoiceStatus.OPEN;
-
-      if (invoice.status !== nextStatus) {
-        await tx.studentInvoice.update({ where: { id: invoice.id }, data: { status: nextStatus } });
-      }
+      if (invoice.status !== nextStatus) await tx.studentInvoice.update({ where: { id: invoice.id }, data: { status: nextStatus } });
     }
   }
 
