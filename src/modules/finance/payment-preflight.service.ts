@@ -37,7 +37,7 @@ export class PaymentPreflightService {
       },
       include: {
         lines: true,
-        allocations: { include: { payment: { select: { refunds: { select: { amount: true, status: true } } } } } },
+        allocations: { include: { payment: { select: { status: true, refunds: { select: { amount: true, status: true } } } } } },
         term: { select: { id: true, code: true, name: true } },
       },
       orderBy: [{ dueAt: 'asc' }, { issuedAt: 'asc' }],
@@ -49,17 +49,19 @@ export class PaymentPreflightService {
 
     const outstandingInvoices = invoices.map((invoice) => {
       const due = invoice.lines.reduce((sum, line) => sum.plus(line.amountDue), new Prisma.Decimal(0));
-      const allocated = invoice.allocations.reduce((sum, allocation) => {
-        const refunded = allocation.payment.refunds
-          .filter((refund) => refund.status === PaymentStatus.SUCCEEDED)
-          .reduce((refundSum, refund) => refundSum.plus(refund.amount), new Prisma.Decimal(0));
-        return sum.plus(Prisma.Decimal.max(allocation.amount.minus(refunded), 0));
-      }, new Prisma.Decimal(0));
-      const outstanding = due.minus(allocated);
+      const settled = invoice.allocations
+        .filter((allocation) => allocation.payment.status === PaymentStatus.SUCCEEDED || allocation.payment.status === PaymentStatus.REFUNDED)
+        .reduce((sum, allocation) => {
+          const refunded = allocation.payment.refunds
+            .filter((refund) => refund.status === PaymentStatus.SUCCEEDED)
+            .reduce((refundSum, refund) => refundSum.plus(refund.amount), new Prisma.Decimal(0));
+          return sum.plus(Prisma.Decimal.max(allocation.amount.minus(refunded), 0));
+        }, new Prisma.Decimal(0));
+      const outstanding = due.minus(settled);
       return {
         invoice,
         total: due,
-        allocated,
+        allocated: settled,
         outstanding,
       };
     });
