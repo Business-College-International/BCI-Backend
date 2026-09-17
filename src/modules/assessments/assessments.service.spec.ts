@@ -64,7 +64,13 @@ describe('AssessmentsService', () => {
 
   it('rejects a result for a student outside the teacher assigned class', async () => {
     const tx = makeTx();
-    tx.assessment.findUnique.mockResolvedValue({ id: 'assessment-1', termId: 'term-1', subjectId: 'subject-1', maxScore: 50 });
+    tx.assessment.findUnique.mockResolvedValue({
+      id: 'assessment-1',
+      termId: 'term-1',
+      subjectId: 'subject-1',
+      maxScore: 50,
+      term: { status: 'OPEN' },
+    });
     tx.staff.findUnique.mockResolvedValue({ personId: 'staff-1' });
     tx.teacherAssignment.findFirst.mockResolvedValue({ id: 'assignment-1' });
     tx.enrolment.findMany.mockResolvedValue([
@@ -81,7 +87,13 @@ describe('AssessmentsService', () => {
 
   it('rejects a score above the assessment maximum', async () => {
     const tx = makeTx();
-    tx.assessment.findUnique.mockResolvedValue({ id: 'assessment-1', termId: 'term-1', subjectId: 'subject-1', maxScore: 50 });
+    tx.assessment.findUnique.mockResolvedValue({
+      id: 'assessment-1',
+      termId: 'term-1',
+      subjectId: 'subject-1',
+      maxScore: 50,
+      term: { status: 'OPEN' },
+    });
     tx.staff.findUnique.mockResolvedValue({ personId: 'staff-1' });
     tx.teacherAssignment.findFirst.mockResolvedValue({ id: 'assignment-1' });
     tx.enrolment.findMany.mockResolvedValue([{ studentId: 'student-1', classId: 'class-assigned' }]);
