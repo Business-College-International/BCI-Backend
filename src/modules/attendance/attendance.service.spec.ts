@@ -52,10 +52,37 @@ describe('AttendanceService access and integrity', () => {
       enrolment: { findMany: jest.fn() },
     };
     prisma.$transaction.mockImplementation(async (callback: (client: typeof tx) => unknown) => callback(tx));
-    tx.attendanceSession.findUnique.mockResolvedValue({ id: 'session-1', classId: 'class-1', termId: 'term-1', subjectId: null });
+    tx.attendanceSession.findUnique.mockResolvedValue({
+      id: 'session-1',
+      classId: 'class-1',
+      termId: 'term-1',
+      subjectId: null,
+      term: { status: 'OPEN' },
+    });
     tx.staff.findUnique.mockResolvedValue({ personId: 'teacher-1' });
     tx.teacherAssignment.findFirst.mockResolvedValue({ id: 'assignment-1' });
     tx.enrolment.findMany.mockResolvedValue([]);
+
+    const service = new AttendanceService(prisma);
+
+    await expect(service.markAttendance('session-1', {
+      records: [{ studentId: 'student-1', status: AttendanceStatus.PRESENT }],
+    }, 'teacher-user-1', [RoleName.TEACHER])).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('blocks attendance changes after the term is closed', async () => {
+    const prisma = makePrisma();
+    const tx = {
+      attendanceSession: { findUnique: jest.fn() },
+    };
+    prisma.$transaction.mockImplementation(async (callback: (client: typeof tx) => unknown) => callback(tx));
+    tx.attendanceSession.findUnique.mockResolvedValue({
+      id: 'session-1',
+      classId: 'class-1',
+      termId: 'term-1',
+      subjectId: null,
+      term: { status: 'CLOSED' },
+    });
 
     const service = new AttendanceService(prisma);
 

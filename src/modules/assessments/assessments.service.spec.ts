@@ -93,6 +93,24 @@ describe('AssessmentsService', () => {
       results: [{ studentId: 'student-1', score: 51 }],
     }, 'teacher-user', [RoleName.TEACHER])).rejects.toBeInstanceOf(BadRequestException);
   });
+
+  it('blocks result entry after the term is closed', async () => {
+    const tx = makeTx();
+    tx.assessment.findUnique.mockResolvedValue({
+      id: 'assessment-1',
+      termId: 'term-1',
+      subjectId: 'subject-1',
+      maxScore: 50,
+      term: { status: 'CLOSED' },
+    });
+
+    const service = new AssessmentsService(makePrisma(tx));
+
+    await expect(service.enterResults('assessment-1', {
+      results: [{ studentId: 'student-1', score: 40 }],
+    }, 'teacher-user', [RoleName.TEACHER])).rejects.toBeInstanceOf(BadRequestException);
+    expect(tx.assessmentResult.upsert).not.toHaveBeenCalled();
+  });
 });
 
 describe('AssessmentsService assessment roster', () => {

@@ -162,8 +162,14 @@ export class AttendanceService {
 
   async markAttendance(sessionId: string, dto: MarkAttendanceDto, actorUserId: string, roles: RoleName[]) {
     return this.prisma.$transaction(async (tx) => {
-      const session = await tx.attendanceSession.findUnique({ where: { id: sessionId } });
+      const session = await tx.attendanceSession.findUnique({
+        where: { id: sessionId },
+        include: { term: { select: { status: true } } },
+      });
       if (!session) throw new NotFoundException('Attendance session not found.');
+      if (session.term.status === 'CLOSED') {
+        throw new BadRequestException('Attendance cannot be changed after the term is closed.');
+      }
 
       await this.assertSessionAccess(tx, session.classId, session.termId, session.subjectId, actorUserId, roles);
 
