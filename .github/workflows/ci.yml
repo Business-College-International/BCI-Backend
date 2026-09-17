@@ -10,6 +10,11 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://bci:bci@localhost:5432/bci_ci
+      NODE_ENV: test
+      JWT_ACCESS_SECRET: ci-only-bci-secret-not-for-production
+      PORT: 3000
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
