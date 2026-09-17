@@ -1,8 +1,17 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { TermLifecycleService } from './term-lifecycle.service';
 
-function makePrisma(tx: any) {
-  return { $transaction: async (callback: (client: any) => unknown) => callback(tx) };
+function makePrisma(tx: any, transactionError?: unknown) {
+  return {
+    $transaction: jest.fn(async (callback: (client: any) => unknown, options: unknown) => {
+      if (transactionError) throw transactionError;
+      expect(options).toEqual(expect.objectContaining({
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      }));
+      return callback(tx);
+    }),
+  };
 }
 
 describe('TermLifecycleService', () => {
@@ -39,5 +48,20 @@ describe('TermLifecycleService', () => {
     const tx = { academicYear: { findUnique: jest.fn().mockResolvedValue({ id: 'year-1', startsAt: new Date('2026-09-01'), endsAt: new Date('2027-08-31') }) } };
     const service = new TermLifecycleService(makePrisma(tx) as never);
     await expect(service.createTerm('year-1', { code: 'T1', name: 'Term 1', startsAt: '2026-08-01', endsAt: '2026-12-01', status: 'DRAFT' } as any, 'actor-1')).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('translates a serialization conflict during term creation into a retryable conflict', async () => {
+    const prisma = makePrisma({}, { code: 'P2034' });
+    const service = new TermLifecycleService(prisma as never);
+    await expect(
+      service.createTerm('year-1', { code: 'T1', name: 'Term 1', startsAt: '2026-09-01', endsAt: '2026-12-01', status: 'OPEN' } as any, 'actor-1'),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('translates a serialization conflict during term transition into a retryable conflict', async () => {
+    const prisma = makePrisma({}, { code: 'P2034' });
+    const service = new TermLifecycleService(prisma as never);
+    await expect(service.transitionTerm('term-1', 'OPEN' as any, 'actor-1'))
+      .rejects.toBeInstanceOf(ConflictException);
   });
 });
