@@ -18,6 +18,22 @@ describe('MoolreDisbursementService.initiateTransfer', () => {
     expect(httpPost).not.toHaveBeenCalled();
   });
 
+  it('returns the same mock transfer for a repeated reference id', async () => {
+    const service = makeService();
+    const first = await service.initiateTransfer({
+      referenceId: 'payroll-run-1-staff-1',
+      amountGhs: 1200,
+      recipientPhone: '0244000000',
+    });
+    const second = await service.initiateTransfer({
+      referenceId: 'payroll-run-1-staff-1',
+      amountGhs: 9999,
+      recipientPhone: '0555000000',
+    });
+
+    expect(second).toEqual(first);
+  });
+
   it('requires a reference id for idempotency', async () => {
     const service = makeService();
     await expect(service.initiateTransfer({ referenceId: '', amountGhs: 10, recipientPhone: '0244000000' }))
