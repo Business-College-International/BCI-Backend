@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
 import { randomBytes } from 'node:crypto';
@@ -41,21 +41,47 @@ export class FinancialJournalService {
       throw new BadRequestException('Journal transaction is not balanced.');
     }
 
+    const referenceType = parsed[0].referenceType.trim();
+    const referenceId = parsed[0].referenceId;
+    if (parsed.some((line) => line.referenceType.trim() !== referenceType || line.referenceId !== referenceId)) {
+      throw new BadRequestException('All journal lines must share the same transaction reference.');
+    }
+
     const entryNumber = `JNL-${new Date().getUTCFullYear()}-${randomBytes(6).toString('hex').toUpperCase()}`;
-    return this.prisma.$transaction(async (tx) => Promise.all(
-      parsed.map((line) => tx.financialJournalEntry.create({
-        data: {
-          entryNumber,
-          accountCode: line.accountCode.trim(),
-          direction: line.direction,
-          amount: line.amount,
-          currency: line.currency,
-          referenceType: line.referenceType.trim(),
-          referenceId: line.referenceId,
-          description: line.description?.trim(),
-          createdBy: actorUserId,
-        },
-      })),
-    ));
+
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const existing = await tx.financialJournalEntry.findMany({
+          where: { referenceType, referenceId },
+          orderBy: { transactionAt: 'asc' },
+        });
+        if (existing.length > 0) return existing;
+
+        return Promise.all(
+          parsed.map((line) => tx.financialJournalEntry.create({
+            data: {
+              entryNumber,
+              accountCode: line.accountCode.trim(),
+              direction: line.direction,
+              amount: line.amount,
+              currency: line.currency,
+              referenceType,
+              referenceId,
+              description: line.description?.trim(),
+              createdBy: actorUserId,
+            },
+          })),
+        );
+      }, {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        maxWait: 5000,
+        timeout: 10000,
+      });
+    } catch (error) {
+      if ((error as { code?: string }).code === 'P2034') {
+        throw new ConflictException('Journal transaction changed concurrently. Please retry.');
+      }
+      throw error;
+    }
   }
 }
