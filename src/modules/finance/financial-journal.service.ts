@@ -17,7 +17,11 @@ type JournalLineInput = {
 export class FinancialJournalService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async recordBalancedEntry(lines: JournalLineInput[], actorUserId?: string) {
+  async recordBalancedEntry(
+    lines: JournalLineInput[],
+    actorUserId?: string,
+    transactionClient?: Prisma.TransactionClient,
+  ) {
     if (lines.length < 2) throw new BadRequestException('A journal transaction requires at least two lines.');
 
     const parsed = lines.map((line) => ({
@@ -47,32 +51,35 @@ export class FinancialJournalService {
       throw new BadRequestException('All journal lines must share the same transaction reference.');
     }
 
-    const entryNumber = `JNL-${new Date().getUTCFullYear()}-${randomBytes(6).toString('hex').toUpperCase()}`;
+    const write = async (tx: Prisma.TransactionClient) => {
+      const existing = await tx.financialJournalEntry.findMany({
+        where: { referenceType, referenceId },
+        orderBy: { transactionAt: 'asc' },
+      });
+      if (existing.length > 0) return existing;
+
+      const entryNumber = `JNL-${new Date().getUTCFullYear()}-${randomBytes(6).toString('hex').toUpperCase()}`;
+      return Promise.all(
+        parsed.map((line) => tx.financialJournalEntry.create({
+          data: {
+            entryNumber,
+            accountCode: line.accountCode.trim(),
+            direction: line.direction,
+            amount: line.amount,
+            currency: line.currency,
+            referenceType,
+            referenceId,
+            description: line.description?.trim(),
+            createdBy: actorUserId,
+          },
+        })),
+      );
+    };
+
+    if (transactionClient) return write(transactionClient);
 
     try {
-      return await this.prisma.$transaction(async (tx) => {
-        const existing = await tx.financialJournalEntry.findMany({
-          where: { referenceType, referenceId },
-          orderBy: { transactionAt: 'asc' },
-        });
-        if (existing.length > 0) return existing;
-
-        return Promise.all(
-          parsed.map((line) => tx.financialJournalEntry.create({
-            data: {
-              entryNumber,
-              accountCode: line.accountCode.trim(),
-              direction: line.direction,
-              amount: line.amount,
-              currency: line.currency,
-              referenceType,
-              referenceId,
-              description: line.description?.trim(),
-              createdBy: actorUserId,
-            },
-          })),
-        );
-      }, {
+      return await this.prisma.$transaction(write, {
         isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
         maxWait: 5000,
         timeout: 10000,
