@@ -6,6 +6,7 @@ export type ProviderWebhook = {
   eventType: string;
   signature: string;
   rawPayload: unknown;
+  rawBody?: string;
 };
 
 export type VerifiedProviderWebhook = ProviderWebhook & {

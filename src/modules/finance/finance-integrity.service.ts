@@ -29,6 +29,7 @@ export class FinanceIntegrityService {
           amount: true,
           completedAt: true,
           receipt: { select: { id: true, receiptNumber: true } },
+          refunds: { select: { amount: true, status: true } },
         },
         orderBy: { createdAt: 'asc' },
       }),
@@ -38,14 +39,16 @@ export class FinanceIntegrityService {
           paymentId: true,
           invoiceId: true,
           amount: true,
-          payment: { select: { id: true, status: true, amount: true } },
+          payment: { select: { id: true, status: true, amount: true, refunds: { select: { amount: true, status: true } } } },
           invoice: { select: { id: true, invoiceNumber: true } },
         },
       }),
     ]);
 
-    const succeededPaymentIds = new Set(
-      payments.filter((payment) => payment.status === PaymentStatus.SUCCEEDED).map((payment) => payment.id),
+    const historicallySuccessfulPaymentIds = new Set(
+      payments
+        .filter((payment) => payment.status === PaymentStatus.SUCCEEDED || payment.status === PaymentStatus.REFUNDED)
+        .map((payment) => payment.id),
     );
     const paymentById = new Map(payments.map((payment) => [payment.id, payment]));
 
@@ -53,11 +56,9 @@ export class FinanceIntegrityService {
     const orphanAllocations: Array<{ id: string; paymentId: string; invoiceId: string; amount: string }> = [];
     const invalidStatusAllocations: Array<{ id: string; paymentId: string; status: PaymentStatus; amount: string }> = [];
     const overAllocatedPayments: Array<{ paymentId: string; paymentAmount: string; allocatedAmount: string }> = [];
+    const overRefundedPayments: Array<{ paymentId: string; paymentAmount: string; refundedAmount: string }> = [];
 
     for (const allocation of allocations) {
-      const current = allocationsByInvoice.get(allocation.invoiceId) ?? new Prisma.Decimal(0);
-      allocationsByInvoice.set(allocation.invoiceId, current.plus(allocation.amount));
-
       if (!paymentById.has(allocation.paymentId)) {
         orphanAllocations.push({
           id: allocation.id,
@@ -67,7 +68,7 @@ export class FinanceIntegrityService {
         });
       }
 
-      if (!succeededPaymentIds.has(allocation.paymentId)) {
+      if (!historicallySuccessfulPaymentIds.has(allocation.paymentId)) {
         invalidStatusAllocations.push({
           id: allocation.id,
           paymentId: allocation.paymentId,
@@ -75,6 +76,15 @@ export class FinanceIntegrityService {
           amount: allocation.amount.toFixed(2),
         });
       }
+
+      const refunded = allocation.payment.refunds
+        .filter((refund) => refund.status === PaymentStatus.SUCCEEDED)
+        .reduce((sum, refund) => sum.plus(refund.amount), new Prisma.Decimal(0));
+      const net = Prisma.Decimal.max(allocation.amount.minus(refunded), 0);
+      allocationsByInvoice.set(
+        allocation.invoiceId,
+        (allocationsByInvoice.get(allocation.invoiceId) ?? new Prisma.Decimal(0)).plus(net),
+      );
     }
 
     const allocationsByPayment = new Map<string, Prisma.Decimal>();
@@ -94,6 +104,16 @@ export class FinanceIntegrityService {
           allocatedAmount: allocated.toFixed(2),
         });
       }
+      const refunded = payment.refunds
+        .filter((refund) => refund.status === PaymentStatus.SUCCEEDED)
+        .reduce((sum, refund) => sum.plus(refund.amount), new Prisma.Decimal(0));
+      if (refunded.gt(payment.amount)) {
+        overRefundedPayments.push({
+          paymentId: payment.id,
+          paymentAmount: payment.amount.toFixed(2),
+          refundedAmount: refunded.toFixed(2),
+        });
+      }
     }
 
     const statusMismatches = [] as Array<{
@@ -107,9 +127,7 @@ export class FinanceIntegrityService {
 
     for (const invoice of invoices) {
       const amountDue = invoice.lines.reduce((sum, line) => sum.plus(line.amountDue), new Prisma.Decimal(0));
-      const succeededAllocated = allocations
-        .filter((allocation) => allocation.invoiceId === invoice.id && allocation.payment.status === PaymentStatus.SUCCEEDED)
-        .reduce((sum, allocation) => sum.plus(allocation.amount), new Prisma.Decimal(0));
+      const succeededAllocated = allocationsByInvoice.get(invoice.id) ?? new Prisma.Decimal(0);
 
       let expectedStatus: 'OPEN' | 'PARTIALLY_PAID' | 'PAID' | 'VOID' = 'OPEN';
       if (invoice.status === InvoiceStatus.VOID) {
@@ -144,9 +162,16 @@ export class FinanceIntegrityService {
       (sum, invoice) => sum.plus(invoice.lines.reduce((lineSum, line) => lineSum.plus(line.amountDue), new Prisma.Decimal(0))),
       new Prisma.Decimal(0),
     );
-    const totalSucceededAllocated = allocations
-      .filter((allocation) => allocation.payment.status === PaymentStatus.SUCCEEDED)
-      .reduce((sum, allocation) => sum.plus(allocation.amount), new Prisma.Decimal(0));
+    const totalSucceededAllocated = Array.from(allocationsByInvoice.values()).reduce(
+      (sum, value) => sum.plus(value),
+      new Prisma.Decimal(0),
+    );
+    const totalSuccessfulRefunds = payments.reduce(
+      (sum, payment) => sum.plus(payment.refunds
+        .filter((refund) => refund.status === PaymentStatus.SUCCEEDED)
+        .reduce((refundSum, refund) => refundSum.plus(refund.amount), new Prisma.Decimal(0))),
+      new Prisma.Decimal(0),
+    );
 
     return {
       generatedAt: new Date().toISOString(),
@@ -156,11 +181,13 @@ export class FinanceIntegrityService {
         allocationCount: allocations.length,
         totalInvoiceAmount: totalInvoiceAmount.toFixed(2),
         totalSucceededAllocated: totalSucceededAllocated.toFixed(2),
+        totalSuccessfulRefunds: totalSuccessfulRefunds.toFixed(2),
       },
       findings: {
         orphanAllocations,
         invalidStatusAllocations,
         overAllocatedPayments,
+        overRefundedPayments,
         statusMismatches,
         succeededWithoutReceipt,
       },
@@ -168,6 +195,7 @@ export class FinanceIntegrityService {
         orphanAllocations.length === 0 &&
         invalidStatusAllocations.length === 0 &&
         overAllocatedPayments.length === 0 &&
+        overRefundedPayments.length === 0 &&
         statusMismatches.length === 0 &&
         succeededWithoutReceipt.length === 0,
     };

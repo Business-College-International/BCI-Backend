@@ -14,7 +14,13 @@ export class PaymentWebhookService {
       const existing = await tx.providerWebhookEvent.findUnique({
         where: { provider_eventId: { provider: verified.provider, eventId: verified.eventId } },
       });
-      if (existing) return { duplicate: true, event: existing };
+      if (existing) {
+        return {
+          duplicate: Boolean(existing.processedAt),
+          retry: !existing.processedAt,
+          event: existing,
+        };
+      }
 
       const event = await tx.providerWebhookEvent.create({
         data: {
@@ -26,7 +32,7 @@ export class PaymentWebhookService {
         },
       });
 
-      return { duplicate: false, event };
+      return { duplicate: false, retry: false, event };
     });
   }
 }

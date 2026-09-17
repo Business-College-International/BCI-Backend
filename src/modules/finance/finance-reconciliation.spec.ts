@@ -29,15 +29,15 @@ describe('FinanceService reconciliation reads', () => {
             id: 'invoice-1',
             status: 'PARTIALLY_PAID',
             lines: [{ amountDue: decimal('100.00') }],
-            allocations: [{ amount: decimal('40.00'), payment: { status: 'SUCCEEDED' } }],
+            allocations: [{ amount: decimal('40.00'), payment: { status: 'SUCCEEDED', refunds: [] } }],
           },
         ]),
       },
       payment: {
         findMany: jest.fn().mockResolvedValue([
-          { status: 'SUCCEEDED', amount: decimal('40.00') },
-          { status: 'PENDING', amount: decimal('30.00') },
-          { status: 'PROCESSING', amount: decimal('20.00') },
+          { status: 'SUCCEEDED', amount: decimal('40.00'), refunds: [] },
+          { status: 'PENDING', amount: decimal('30.00'), refunds: [] },
+          { status: 'PROCESSING', amount: decimal('20.00'), refunds: [] },
         ]),
       },
     };

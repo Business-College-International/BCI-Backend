@@ -35,6 +35,7 @@ describe('FinanceIntegrityService', () => {
         amount: new Prisma.Decimal('60.00'),
         completedAt: null,
         receipt: null,
+        refunds: [],
       },
       {
         id: 'payment-2',
@@ -42,6 +43,7 @@ describe('FinanceIntegrityService', () => {
         amount: new Prisma.Decimal('40.00'),
         completedAt: null,
         receipt: null,
+        refunds: [],
       },
     ]);
     prisma.paymentAllocation.findMany.mockResolvedValue([
@@ -50,7 +52,7 @@ describe('FinanceIntegrityService', () => {
         paymentId: 'payment-1',
         invoiceId: 'invoice-1',
         amount: new Prisma.Decimal('60.00'),
-        payment: { id: 'payment-1', status: PaymentStatus.SUCCEEDED, amount: new Prisma.Decimal('60.00') },
+        payment: { id: 'payment-1', status: PaymentStatus.SUCCEEDED, amount: new Prisma.Decimal('60.00'), refunds: [] },
         invoice: { id: 'invoice-1', invoiceNumber: 'BCI-2026-001' },
       },
       {
@@ -58,7 +60,7 @@ describe('FinanceIntegrityService', () => {
         paymentId: 'payment-2',
         invoiceId: 'invoice-1',
         amount: new Prisma.Decimal('40.00'),
-        payment: { id: 'payment-2', status: PaymentStatus.FAILED, amount: new Prisma.Decimal('40.00') },
+        payment: { id: 'payment-2', status: PaymentStatus.FAILED, amount: new Prisma.Decimal('40.00'), refunds: [] },
         invoice: { id: 'invoice-1', invoiceNumber: 'BCI-2026-001' },
       },
     ]);
@@ -71,5 +73,6 @@ describe('FinanceIntegrityService', () => {
     expect(report.findings.invalidStatusAllocations[0].paymentId).toBe('payment-2');
     expect(report.findings.succeededWithoutReceipt).toHaveLength(1);
     expect(report.findings.succeededWithoutReceipt[0].paymentId).toBe('payment-1');
+    expect(report.findings.overRefundedPayments).toHaveLength(0);
   });
 });
