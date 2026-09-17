@@ -36,4 +36,20 @@ export class RefundController {
   ) {
     return this.refunds.approveRefund(refundId, request.user.id, request.user.roles);
   }
+
+  @Post(':refundId/execute')
+  execute(
+    @Param('refundId') refundId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.refunds.executeRefund(refundId, request.user.id, request.user.roles);
+  }
+
+  @Post(':refundId/reconcile')
+  reconcile(
+    @Param('refundId') refundId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.refunds.reconcileRefund(refundId, request.user.id, request.user.roles);
+  }
 }
