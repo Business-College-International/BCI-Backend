@@ -42,9 +42,13 @@ function makeService() {
         status: PaymentStatus.PENDING,
         clientReference: 'bci-client-ref',
       }),
+      update: jest.fn().mockResolvedValue({}),
     },
     paymentAllocation: { create: jest.fn().mockResolvedValue({}) },
-    paymentProviderAttempt: { create: jest.fn().mockResolvedValue({ id: 'attempt-1' }) },
+    paymentProviderAttempt: {
+      create: jest.fn().mockResolvedValue({ id: 'attempt-1' }),
+      update: jest.fn().mockResolvedValue({}),
+    },
     auditLog: { create: jest.fn().mockResolvedValue({}) },
   };
 
