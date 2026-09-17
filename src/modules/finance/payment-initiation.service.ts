@@ -65,38 +65,32 @@ export class PaymentInitiationService {
         callbackUrl: dto.callbackUrl ?? '',
         customer: reservation.customer,
       });
-    } catch (error) {
+    } catch {
       await this.prisma.$transaction(async (tx) => {
-        const failedAt = new Date();
-        await tx.payment.update({
-          where: { id: reservation.payment.id },
+        await tx.payment.updateMany({
+          where: { id: reservation.payment.id, status: PaymentStatus.PENDING },
           data: {
-            status: PaymentStatus.FAILED,
-            failureCode: 'PROVIDER_INITIATION_FAILED',
-            failureMessage: error instanceof Error ? error.message : 'Payment provider initiation failed.',
-            completedAt: failedAt,
+            status: PaymentStatus.PROCESSING,
+            provider: this.moolre.provider,
+            providerReference: null,
+            failureCode: 'PROVIDER_INITIATION_UNKNOWN',
+            failureMessage: 'Provider initiation outcome is unknown; awaiting webhook reconciliation.',
+            completedAt: null,
           },
         });
-        await tx.paymentProviderAttempt.update({
-          where: { id: reservation.attemptId },
+        await tx.paymentProviderAttempt.updateMany({
+          where: { id: reservation.attemptId, status: PaymentStatus.PENDING },
           data: {
-            status: PaymentStatus.FAILED,
-            resolvedAt: failedAt,
-            failureCode: 'PROVIDER_INITIATION_FAILED',
-            failureMessage: error instanceof Error ? error.message : 'Payment provider initiation failed.',
-          },
-        });
-        await tx.idempotencyKey.update({
-          where: { userId_key_operation: { userId: actorUserId, key: idempotencyKey.trim(), operation: 'payments.initiate' } },
-          data: {
-            responseJson: { paymentId: reservation.payment.id, status: PaymentStatus.FAILED },
-            statusCode: 503,
-            completedAt: failedAt,
+            status: PaymentStatus.PROCESSING,
+            providerReference: null,
+            failureCode: 'PROVIDER_INITIATION_UNKNOWN',
+            failureMessage: 'Provider initiation outcome is unknown; awaiting webhook reconciliation.',
+            resolvedAt: null,
           },
         });
       });
 
-      throw new ServiceUnavailableException('Payment provider initiation failed; no funds were captured.');
+      throw new ServiceUnavailableException('Payment provider initiation outcome is unknown; the payment remains processing and requires reconciliation.');
     }
 
     try {
