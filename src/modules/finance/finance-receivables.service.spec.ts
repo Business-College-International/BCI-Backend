@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
-import { InvoiceStatus, Prisma, RoleName } from '@prisma/client';
+import { InvoiceStatus, PaymentStatus, Prisma, RoleName } from '@prisma/client';
 import { FinanceReceivablesService } from './finance-receivables.service';
 
 function makePrisma() {
@@ -71,18 +71,20 @@ describe('FinanceReceivablesService', () => {
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
-  it('builds ageing buckets from outstanding invoice balances', async () => {
+  it('builds ageing buckets from net outstanding invoice balances after refunds', async () => {
     const prisma = makePrisma();
     const asOf = new Date('2026-09-15T00:00:00.000Z');
     prisma.studentInvoice.findMany.mockResolvedValue([
       {
         id: 'invoice-1', invoiceNumber: 'BCI-1', dueAt: new Date('2026-09-10T00:00:00.000Z'),
-        lines: [{ amountDue: '500.00' }], allocations: [{ amount: '100.00' }],
+        lines: [{ amountDue: '500.00' }],
+        allocations: [{ amount: '200.00', payment: { refunds: [{ amount: '100.00', status: PaymentStatus.SUCCEEDED }] } }],
         student: { id: 'student-1', admissionNumber: 'BCI-001', firstName: 'Ama', lastName: 'Doe' },
       },
       {
         id: 'invoice-2', invoiceNumber: 'BCI-2', dueAt: new Date('2026-07-01T00:00:00.000Z'),
-        lines: [{ amountDue: '1000.00' }], allocations: [],
+        lines: [{ amountDue: '1000.00' }],
+        allocations: [],
         student: { id: 'student-2', admissionNumber: 'BCI-002', firstName: 'Kojo', lastName: 'Doe' },
       },
     ]);
@@ -94,5 +96,28 @@ describe('FinanceReceivablesService', () => {
     expect(result.totals.days61to90).toBe('1000.00');
     expect(result.totals.outstanding).toBe('1400.00');
     expect(result.rows).toHaveLength(2);
+  });
+
+  it('reports a refunded payment as reducing the invoice allocated balance', async () => {
+    const prisma = makePrisma();
+    prisma.studentInvoice.findMany.mockResolvedValue([
+      {
+        id: 'invoice-1',
+        invoiceNumber: 'BCI-1',
+        status: InvoiceStatus.PAID,
+        issuedAt: new Date('2026-09-01T00:00:00.000Z'),
+        dueAt: null,
+        lines: [{ amountDue: '100.00' }],
+        allocations: [{ amount: '100.00', payment: { status: PaymentStatus.REFUNDED, refunds: [{ amount: '25.00', status: PaymentStatus.SUCCEEDED }] } }],
+        student: { admissionNumber: 'BCI-001', firstName: 'Ama', lastName: 'Doe' },
+        term: { id: 'term-1', code: 'T1', name: 'Term 1' },
+      },
+    ]);
+
+    const service = new FinanceReceivablesService(prisma as never);
+    const result = await service.listInvoices({}, 'accountant-1', [RoleName.ACCOUNTANT]);
+
+    expect(result[0].allocatedAmount).toBe('75.00');
+    expect(result[0].outstandingAmount).toBe('25.00');
   });
 });
