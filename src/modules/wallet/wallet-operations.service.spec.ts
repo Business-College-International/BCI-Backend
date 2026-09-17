@@ -1,5 +1,6 @@
 import { ConflictException } from '@nestjs/common';
 import { Prisma, RoleName, WalletTransactionType } from '@prisma/client';
+import { createHash } from 'node:crypto';
 import { WalletOperationsService } from './wallet-operations.service';
 
 describe('WalletOperationsService', () => {
@@ -49,8 +50,16 @@ describe('WalletOperationsService', () => {
   });
 
   it('replays a completed withdrawal without creating another wallet transaction', async () => {
+    const requestHash = createHash('sha256')
+      .update(JSON.stringify({
+        studentId: 'student-1',
+        amount: 50,
+        note: 'Student office withdrawal',
+      }))
+      .digest('hex');
+
     tx.idempotencyKey.findUnique.mockResolvedValue({
-      requestHash: expect.any(String),
+      requestHash,
       responseJson: {
         transactionId: 'existing-withdrawal',
         studentId: 'student-1',
