@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { PayrollPeriodStatus, RoleName } from '@prisma/client';
+import { PayrollPeriodStatus, Prisma, RoleName } from '@prisma/client';
 import { PayrollCalculatorService } from './payroll-calculator.service';
 
 function makeTx() {
@@ -45,7 +45,7 @@ function makeStaff(salary: { effectiveAt: string; endedAt: string | null }) {
     staffIdNo: 'STAFF-001',
     employmentStatus: 'active',
     salary: {
-      basePay: '5000.00',
+      basePay: new Prisma.Decimal('5000.00'),
       allowances: [],
       deductions: [],
       effectiveAt: new Date(salary.effectiveAt),
