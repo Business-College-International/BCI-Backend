@@ -12,6 +12,8 @@ import { PaymentPreflightController } from './payment-preflight.controller';
 import { PaymentPreflightService } from './payment-preflight.service';
 import { PaymentInitiationController } from './payment-initiation.controller';
 import { PaymentInitiationService } from './payment-initiation.service';
+import { PaymentOtpController } from './payment-otp.controller';
+import { PaymentOtpService } from './payment-otp.service';
 import { FinanceIntegrityController } from './finance-integrity.controller';
 import { FinanceIntegrityService } from './finance-integrity.service';
 import { RefundController } from './refund.controller';
@@ -30,6 +32,7 @@ import { FinanceBillingRunService } from './finance-billing-run.service';
     FinanceReceivablesController,
     PaymentPreflightController,
     PaymentInitiationController,
+    PaymentOtpController,
     FinanceIntegrityController,
     RefundController,
     FinanceStatementController,
@@ -41,6 +44,7 @@ import { FinanceBillingRunService } from './finance-billing-run.service';
     FinanceReceivablesService,
     PaymentPreflightService,
     PaymentInitiationService,
+    PaymentOtpService,
     FinanceIntegrityService,
     RefundService,
     FinancialJournalService,
@@ -48,6 +52,6 @@ import { FinanceBillingRunService } from './finance-billing-run.service';
     FinanceBillingRunService,
     PrismaService,
   ],
-  exports: [RefundService, FinancialJournalService, PaymentInitiationService],
+  exports: [RefundService, FinancialJournalService, PaymentInitiationService, PaymentOtpService],
 })
 export class FinanceModule {}

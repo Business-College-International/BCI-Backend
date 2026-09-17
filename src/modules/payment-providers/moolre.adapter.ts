@@ -28,6 +28,13 @@ export type MoolreAdapterOptions = {
   now?: () => Date;
 };
 
+export type MoolrePaymentResult = {
+  providerReference: string | null;
+  requiresOtp: boolean;
+  mock: boolean;
+  sessionId?: string | null;
+};
+
 @Injectable()
 export class MoolreAdapter implements PaymentProviderPort {
   readonly provider = 'MOOLRE';
@@ -118,14 +125,14 @@ export class MoolreAdapter implements PaymentProviderPort {
     purpose: string;
     callbackUrl: string;
     customer: { name: string; phone: string; network?: string };
-  }): Promise<{ providerReference: string | null; requiresOtp: boolean; mock: boolean }> {
+  }): Promise<MoolrePaymentResult> {
     if (!input.clientReference) throw new BadRequestException('clientReference is required for Moolre initiation.');
     if (input.currency !== SUPPORTED_CURRENCY) throw new BadRequestException(`Moolre collections only support ${SUPPORTED_CURRENCY}.`);
 
     if (this.config.providerMode === 'MOCK') {
       const providerReference = `mock-moolre-${this.now().getTime()}`;
       this.mockLedger.set(input.clientReference, providerReference);
-      return { providerReference, requiresOtp: false, mock: true };
+      return { providerReference, requiresOtp: false, mock: true, sessionId: null };
     }
 
     const network = (input.customer.network ?? 'MTN').toUpperCase();
@@ -141,9 +148,67 @@ export class MoolreAdapter implements PaymentProviderPort {
     };
 
     const envelope = await this.post('/open/transact/payment', body, this.publicHeaders());
+    const sessionId = extractSessionId(envelope);
     if (Number(envelope.status) === 0) throw new BadRequestException(envelope.message ?? 'Moolre payment initiation failed.');
-    if (envelope.code === 'TP14') return { providerReference: null, requiresOtp: true, mock: false };
-    return { providerReference: typeof envelope.data === 'string' ? envelope.data : null, requiresOtp: false, mock: false };
+    if (envelope.code === 'TP14') {
+      return { providerReference: null, requiresOtp: true, mock: false, sessionId };
+    }
+    return {
+      providerReference: extractProviderReference(envelope.data),
+      requiresOtp: false,
+      mock: false,
+      sessionId,
+    };
+  }
+
+  async submitPaymentOtp(input: {
+    clientReference: string;
+    amount: string;
+    currency: string;
+    payer: string;
+    network?: string;
+    otpCode: string;
+    sessionId?: string | null;
+  }): Promise<MoolrePaymentResult> {
+    if (!input.clientReference) throw new BadRequestException('clientReference is required for Moolre OTP submission.');
+    if (!input.otpCode) throw new BadRequestException('otpCode is required for Moolre OTP submission.');
+    if (input.currency !== SUPPORTED_CURRENCY) throw new BadRequestException(`Moolre collections only support ${SUPPORTED_CURRENCY}.`);
+
+    if (this.config.providerMode === 'MOCK') {
+      const providerReference = this.mockLedger.get(input.clientReference) ?? `mock-moolre-${this.now().getTime()}`;
+      this.mockLedger.set(input.clientReference, providerReference);
+      return { providerReference, requiresOtp: false, mock: true, sessionId: input.sessionId ?? null };
+    }
+
+    const network = (input.network ?? 'MTN').toUpperCase();
+    const channel = PAYMENT_CHANNEL_MAP[network] ?? PAYMENT_CHANNEL_MAP.MTN;
+    const body = {
+      type: 1,
+      channel,
+      currency: SUPPORTED_CURRENCY,
+      payer: sanitizeMsisdn(input.payer),
+      amount: input.amount,
+      externalref: input.clientReference,
+      otpcode: input.otpCode,
+      ...(input.sessionId ? { sessionid: input.sessionId } : {}),
+      accountnumber: this.config.accountNumber ?? undefined,
+    };
+
+    const envelope = await this.post('/open/transact/payment', body, this.publicHeaders());
+    const sessionId = extractSessionId(envelope) ?? input.sessionId ?? null;
+    if (Number(envelope.status) === 0) {
+      throw new BadRequestException(envelope.message ?? 'Moolre OTP submission failed.');
+    }
+    if (envelope.code === 'TP14') {
+      return { providerReference: null, requiresOtp: true, mock: false, sessionId };
+    }
+
+    return {
+      providerReference: extractProviderReference(envelope.data),
+      requiresOtp: false,
+      mock: false,
+      sessionId,
+    };
   }
 
   peekMockLedger(clientReference: string): string | null {
@@ -169,6 +234,8 @@ export type MoolreResponseEnvelope = {
   status?: number | string;
   code?: string | null;
   message?: string | null;
+  sessionid?: string | null;
+  sessionId?: string | null;
   data?: unknown;
 };
 
@@ -200,6 +267,29 @@ function normalizeAmount(raw: string | number | undefined | null): string | null
 function serializePayload(payload: unknown): string {
   if (typeof payload === 'string') return payload;
   return JSON.stringify(payload);
+}
+
+function extractSessionId(envelope: MoolreResponseEnvelope): string | null {
+  const direct = envelope.sessionid ?? envelope.sessionId;
+  if (typeof direct === 'string' && direct.trim()) return direct.trim();
+  if (envelope.data && typeof envelope.data === 'object') {
+    const data = envelope.data as Record<string, unknown>;
+    const nested = data.sessionid ?? data.sessionId;
+    if (typeof nested === 'string' && nested.trim()) return nested.trim();
+  }
+  return null;
+}
+
+function extractProviderReference(data: unknown): string | null {
+  if (typeof data === 'string' && data.trim()) return data.trim();
+  if (data && typeof data === 'object') {
+    const payload = data as Record<string, unknown>;
+    for (const key of ['id', 'providerReference', 'reference', 'transactionid', 'transactionId']) {
+      const value = payload[key];
+      if (typeof value === 'string' && value.trim()) return value.trim();
+    }
+  }
+  return null;
 }
 
 function safeEqualHex(actual: string, expected: string): boolean {

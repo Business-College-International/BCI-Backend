@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { InvoiceStatus, Prisma, RoleName } from '@prisma/client';
+import { InvoiceStatus, PaymentStatus, Prisma, RoleName } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
 import { ListInvoicesDto } from './dto/list-invoices.dto';
 import { VoidInvoiceDto } from './dto/void-invoice.dto';
@@ -32,7 +32,7 @@ export class FinanceReceivablesService {
       },
       include: {
         lines: true,
-        allocations: { include: { payment: { select: { status: true } } } },
+        allocations: { include: { payment: { select: { status: true, refunds: { select: { amount: true, status: true } } } } } },
         student: { select: { admissionNumber: true, firstName: true, lastName: true } },
         term: { select: { id: true, code: true, name: true } },
       },
@@ -42,7 +42,12 @@ export class FinanceReceivablesService {
 
     return invoices.map((invoice) => {
       const due = invoice.lines.reduce((sum, line) => sum.plus(line.amountDue), new Prisma.Decimal(0));
-      const allocated = invoice.allocations.reduce((sum, allocation) => sum.plus(allocation.amount), new Prisma.Decimal(0));
+      const allocated = invoice.allocations.reduce((sum, allocation) => {
+        const refunded = allocation.payment.refunds
+          .filter((refund) => refund.status === PaymentStatus.SUCCEEDED)
+          .reduce((refundSum, refund) => refundSum.plus(refund.amount), new Prisma.Decimal(0));
+        return sum.plus(Prisma.Decimal.max(allocation.amount.minus(refunded), 0));
+      }, new Prisma.Decimal(0));
       return {
         id: invoice.id,
         invoiceNumber: invoice.invoiceNumber,
@@ -112,7 +117,11 @@ export class FinanceReceivablesService {
     this.assertManagementScope(roles, actorUserId);
     const invoices = await this.prisma.studentInvoice.findMany({
       where: { status: { in: [InvoiceStatus.OPEN, InvoiceStatus.PARTIALLY_PAID] } },
-      include: { lines: true, allocations: true, student: { select: { id: true, admissionNumber: true, firstName: true, lastName: true } } },
+      include: {
+        lines: true,
+        allocations: { include: { payment: { select: { refunds: { select: { amount: true, status: true } } } } } },
+        student: { select: { id: true, admissionNumber: true, firstName: true, lastName: true } },
+      },
     });
 
     const buckets = { current: new Prisma.Decimal(0), days1to30: new Prisma.Decimal(0), days31to60: new Prisma.Decimal(0), days61to90: new Prisma.Decimal(0), over90: new Prisma.Decimal(0) };
@@ -120,7 +129,12 @@ export class FinanceReceivablesService {
 
     for (const invoice of invoices) {
       const due = invoice.lines.reduce((sum, line) => sum.plus(line.amountDue), new Prisma.Decimal(0));
-      const allocated = invoice.allocations.reduce((sum, allocation) => sum.plus(allocation.amount), new Prisma.Decimal(0));
+      const allocated = invoice.allocations.reduce((sum, allocation) => {
+        const refunded = allocation.payment.refunds
+          .filter((refund) => refund.status === PaymentStatus.SUCCEEDED)
+          .reduce((refundSum, refund) => refundSum.plus(refund.amount), new Prisma.Decimal(0));
+        return sum.plus(Prisma.Decimal.max(allocation.amount.minus(refunded), 0));
+      }, new Prisma.Decimal(0));
       const outstanding = due.minus(allocated);
       if (outstanding.lte(0)) continue;
       const ageDays = invoice.dueAt ? Math.max(0, Math.floor((asOf.getTime() - invoice.dueAt.getTime()) / 86_400_000)) : 0;

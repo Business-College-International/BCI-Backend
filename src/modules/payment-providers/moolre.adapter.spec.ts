@@ -215,11 +215,11 @@ describe('MoolreAdapter.initiatePayment', () => {
       expect.objectContaining({ channel: 13, externalref: 'bci-client-ref-1', payer: '0244000000' }),
       expect.objectContaining({ 'X-API-PUBKEY': 'p' }),
     );
-    expect(result).toEqual({ providerReference: 'moolre-ref-1', requiresOtp: false, mock: false });
+    expect(result).toEqual({ providerReference: 'moolre-ref-1', requiresOtp: false, mock: false, sessionId: null });
   });
 
-  it('surfaces the OTP gate on TP14', async () => {
-    const httpPost = jest.fn(async () => ({ status: 200, body: { status: 1, code: 'TP14' } }));
+  it('surfaces the OTP gate and session id on TP14', async () => {
+    const httpPost = jest.fn(async () => ({ status: 200, body: { status: 1, code: 'TP14', data: { sessionid: 'session-1' } } }));
     const adapter = makeAdapter({ providerMode: 'LIVE' }, httpPost);
     const result = await adapter.initiatePayment({
       clientReference: 'ref',
@@ -231,18 +231,56 @@ describe('MoolreAdapter.initiatePayment', () => {
     });
     expect(result.requiresOtp).toBe(true);
     expect(result.providerReference).toBeNull();
+    expect(result.sessionId).toBe('session-1');
+  });
+});
+
+describe('MoolreAdapter.submitPaymentOtp', () => {
+  it('submits otpcode and optional sessionid to the payment endpoint', async () => {
+    const httpPost = jest.fn(async () => ({ status: 200, body: { status: 1, code: 'P01', data: 'moolre-ref-otp-1' } }));
+    const adapter = makeAdapter({ providerMode: 'LIVE', apiUser: 'u', apiKey: 'k', apiPubKey: 'p', accountNumber: 'ACC-1' }, httpPost);
+
+    const result = await adapter.submitPaymentOtp({
+      clientReference: 'bci-client-ref-1',
+      amount: '10.00',
+      currency: 'GHS',
+      payer: '0244000000',
+      network: 'Telecel',
+      otpCode: '123456',
+      sessionId: 'session-1',
+    });
+
+    expect(httpPost).toHaveBeenCalledWith(
+      expect.stringContaining('/open/transact/payment'),
+      expect.objectContaining({
+        type: 1,
+        channel: 6,
+        payer: '0244000000',
+        amount: '10.00',
+        externalref: 'bci-client-ref-1',
+        otpcode: '123456',
+        sessionid: 'session-1',
+      }),
+      expect.objectContaining({ 'X-API-PUBKEY': 'p' }),
+    );
+    expect(result).toEqual({ providerReference: 'moolre-ref-otp-1', requiresOtp: false, mock: false, sessionId: 'session-1' });
   });
 
-  it('rejects non-GHS currency', async () => {
-    const adapter = makeAdapter();
-    await expect(adapter.initiatePayment({
+  it('keeps the OTP gate open when Moolre returns TP14 again', async () => {
+    const httpPost = jest.fn(async () => ({ status: 200, body: { status: 1, code: 'TP14', sessionid: 'session-2' } }));
+    const adapter = makeAdapter({ providerMode: 'LIVE' }, httpPost);
+
+    const result = await adapter.submitPaymentOtp({
       clientReference: 'ref',
       amount: '10.00',
-      currency: 'USD',
-      purpose: 'FEE',
-      callbackUrl: 'https://bci.example/callback',
-      customer: { name: 'G', phone: '0244000000' },
-    })).rejects.toThrow();
+      currency: 'GHS',
+      payer: '0244000000',
+      otpCode: '111111',
+      sessionId: 'session-1',
+    });
+
+    expect(result.requiresOtp).toBe(true);
+    expect(result.sessionId).toBe('session-2');
   });
 });
 

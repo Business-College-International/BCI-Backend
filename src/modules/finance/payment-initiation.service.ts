@@ -101,6 +101,7 @@ export class PaymentInitiationService {
 
     try {
       const status = PaymentStatus.PROCESSING;
+      const selectedNetwork = reservation.customer.network ?? 'MTN';
       const updated = await this.prisma.$transaction(async (tx) => {
         const payment = await tx.payment.update({
           where: { id: reservation.payment.id },
@@ -119,6 +120,8 @@ export class PaymentInitiationService {
             responsePayload: {
               providerReference: providerResult.providerReference,
               requiresOtp: providerResult.requiresOtp,
+              sessionId: providerResult.sessionId ?? null,
+              network: selectedNetwork,
               mock: providerResult.mock,
             },
           },
@@ -133,6 +136,8 @@ export class PaymentInitiationService {
           provider: this.moolre.provider,
           providerReference: providerResult.providerReference,
           requiresOtp: providerResult.requiresOtp,
+          sessionId: providerResult.sessionId ?? null,
+          network: selectedNetwork,
           mock: providerResult.mock,
           allocations: reservation.allocations,
         };
@@ -151,9 +156,6 @@ export class PaymentInitiationService {
 
       return updated;
     } catch {
-      // The provider has accepted the payment request, but local persistence failed.
-      // Deliberately do not mark the payment FAILED: the provider/webhook path must be
-      // allowed to reconcile the transaction using the already-created client reference.
       throw new ServiceUnavailableException('Payment provider accepted the request; local state is awaiting reconciliation.');
     }
   }
@@ -199,7 +201,7 @@ export class PaymentInitiationService {
           },
           include: {
             lines: true,
-            allocations: { include: { payment: { select: { status: true } } } },
+            allocations: { include: { payment: { select: { status: true, refunds: { select: { amount: true, status: true } } } } } },
           },
           orderBy: [{ dueAt: 'asc' }, { issuedAt: 'asc' }],
         });
@@ -211,8 +213,13 @@ export class PaymentInitiationService {
         const availableByInvoice = invoices.map((invoice) => {
           const due = invoice.lines.reduce((sum, line) => sum.plus(line.amountDue), new Prisma.Decimal(0));
           const settled = invoice.allocations
-            .filter((allocation) => allocation.payment.status === PaymentStatus.SUCCEEDED)
-            .reduce((sum, allocation) => sum.plus(allocation.amount), new Prisma.Decimal(0));
+            .filter((allocation) => allocation.payment.status === PaymentStatus.SUCCEEDED || allocation.payment.status === PaymentStatus.REFUNDED)
+            .reduce((sum, allocation) => {
+              const refunded = allocation.payment.refunds
+                .filter((refund) => refund.status === PaymentStatus.SUCCEEDED)
+                .reduce((refundSum, refund) => refundSum.plus(refund.amount), new Prisma.Decimal(0));
+              return sum.plus(Prisma.Decimal.max(allocation.amount.minus(refunded), 0));
+            }, new Prisma.Decimal(0));
           const reserved = invoice.allocations
             .filter((allocation) => allocation.payment.status === PaymentStatus.PENDING || allocation.payment.status === PaymentStatus.PROCESSING)
             .reduce((sum, allocation) => sum.plus(allocation.amount), new Prisma.Decimal(0));

@@ -37,7 +37,7 @@ export class PaymentPreflightService {
       },
       include: {
         lines: true,
-        allocations: true,
+        allocations: { include: { payment: { select: { refunds: { select: { amount: true, status: true } } } } } },
         term: { select: { id: true, code: true, name: true } },
       },
       orderBy: [{ dueAt: 'asc' }, { issuedAt: 'asc' }],
@@ -49,7 +49,12 @@ export class PaymentPreflightService {
 
     const outstandingInvoices = invoices.map((invoice) => {
       const due = invoice.lines.reduce((sum, line) => sum.plus(line.amountDue), new Prisma.Decimal(0));
-      const allocated = invoice.allocations.reduce((sum, allocation) => sum.plus(allocation.amount), new Prisma.Decimal(0));
+      const allocated = invoice.allocations.reduce((sum, allocation) => {
+        const refunded = allocation.payment.refunds
+          .filter((refund) => refund.status === PaymentStatus.SUCCEEDED)
+          .reduce((refundSum, refund) => refundSum.plus(refund.amount), new Prisma.Decimal(0));
+        return sum.plus(Prisma.Decimal.max(allocation.amount.minus(refunded), 0));
+      }, new Prisma.Decimal(0));
       const outstanding = due.minus(allocated);
       return {
         invoice,
@@ -124,9 +129,9 @@ export class PaymentPreflightService {
         })),
       },
       reservation: {
-        available: false,
+        available: true,
         requiredBeforeProviderInitiation: true,
-        reason: 'The current database has no persistent invoice payment-reservation entity; this preflight does not lock balances or prevent concurrent payment attempts.',
+        reason: 'This preflight is advisory; payment initiation performs the transactional invoice reservation and rechecks the net balance after refunds.',
       },
     };
   }
