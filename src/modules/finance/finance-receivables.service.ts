@@ -60,30 +60,52 @@ export class FinanceReceivablesService {
 
   async voidInvoice(invoiceId: string, dto: VoidInvoiceDto, actorUserId: string, roles: RoleName[]) {
     this.assertManagementScope(roles, actorUserId);
-    return this.prisma.$transaction(async (tx) => {
-      const invoice = await tx.studentInvoice.findUnique({
-        where: { id: invoiceId },
-        include: { allocations: true },
-      });
-      if (!invoice) throw new NotFoundException('Invoice not found.');
-      if (invoice.status === InvoiceStatus.VOID) throw new ConflictException('Invoice is already void.');
-      if (invoice.status === InvoiceStatus.PAID || invoice.allocations.length > 0) {
-        throw new BadRequestException('Invoices with allocated payments cannot be voided. Use the payment/refund workflow instead.');
-      }
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const invoice = await tx.studentInvoice.findUnique({
+          where: { id: invoiceId },
+          include: { allocations: true },
+        });
+        if (!invoice) throw new NotFoundException('Invoice not found.');
+        if (invoice.status === InvoiceStatus.VOID) throw new ConflictException('Invoice is already void.');
+        if (invoice.status === InvoiceStatus.PAID || invoice.allocations.length > 0) {
+          throw new BadRequestException('Invoices with allocated payments cannot be voided. Use the payment/refund workflow instead.');
+        }
 
-      const updated = await tx.studentInvoice.update({ where: { id: invoiceId }, data: { status: InvoiceStatus.VOID } });
-      await tx.auditLog.create({
-        data: {
-          actorUserId,
-          action: 'UPDATE',
-          entityType: 'StudentInvoice',
-          entityId: invoiceId,
-          beforeJson: { status: invoice.status },
-          afterJson: { status: updated.status, reason: dto.reason.trim() },
-        },
+        const updated = await tx.studentInvoice.updateMany({
+          where: {
+            id: invoiceId,
+            status: invoice.status,
+            allocations: { none: {} },
+          },
+          data: { status: InvoiceStatus.VOID },
+        });
+        if (updated.count !== 1) {
+          throw new ConflictException('Invoice changed concurrently. Please reload and retry.');
+        }
+
+        await tx.auditLog.create({
+          data: {
+            actorUserId,
+            action: 'UPDATE',
+            entityType: 'StudentInvoice',
+            entityId: invoiceId,
+            beforeJson: { status: invoice.status },
+            afterJson: { status: InvoiceStatus.VOID, reason: dto.reason.trim() },
+          },
+        });
+        return { success: true, invoiceId, status: InvoiceStatus.VOID };
+      }, {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        maxWait: 5000,
+        timeout: 10000,
       });
-      return { success: true, invoiceId, status: updated.status };
-    });
+    } catch (error) {
+      if ((error as { code?: string }).code === 'P2034') {
+        throw new ConflictException('Invoice changed concurrently. Please reload and retry.');
+      }
+      throw error;
+    }
   }
 
   async ageing(actorUserId: string, roles: RoleName[], asOf = new Date()) {
