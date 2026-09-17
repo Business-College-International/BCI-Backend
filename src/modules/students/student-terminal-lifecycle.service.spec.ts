@@ -1,4 +1,5 @@
 import { ConflictException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { StudentTerminalLifecycleService } from './student-terminal-lifecycle.service';
 
 describe('StudentTerminalLifecycleService', () => {
@@ -13,10 +14,16 @@ describe('StudentTerminalLifecycleService', () => {
     };
   }
 
-  function makePrisma(tx: ReturnType<typeof makeTx>) {
+  function makePrisma(tx: ReturnType<typeof makeTx>, transactionError?: unknown) {
     return {
       student: { findUnique: jest.fn() },
-      $transaction: async (callback: (client: unknown) => unknown) => callback(tx),
+      $transaction: jest.fn(async (callback: (client: unknown) => unknown, options: unknown) => {
+        if (transactionError) throw transactionError;
+        expect(options).toEqual(expect.objectContaining({
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        }));
+        return callback(tx);
+      }),
     } as never;
   }
 
@@ -38,5 +45,21 @@ describe('StudentTerminalLifecycleService', () => {
     });
     const service = new StudentTerminalLifecycleService(makePrisma(tx));
     await expect(service.graduate('student-1', 'actor-1', 'DIRECTOR' as never)).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('translates a concurrent graduation into a retryable conflict', async () => {
+    const prisma = makePrisma(makeTx({}), { code: 'P2034' });
+    const service = new StudentTerminalLifecycleService(prisma);
+    await expect(service.graduate('student-1', 'actor-1', 'DIRECTOR' as never))
+      .rejects.toEqual(expect.objectContaining({ message: 'Student lifecycle changed concurrently. Please retry the operation.' }));
+  });
+
+  it('translates a concurrent transfer into a retryable conflict', async () => {
+    const prisma = makePrisma(makeTx({}), { code: 'P2034' });
+    const service = new StudentTerminalLifecycleService(prisma);
+    await expect(service.transfer('student-1', 'actor-1', ['DIRECTOR'] as never, {
+      destinationSchool: 'Other School',
+      reason: 'Family relocation',
+    } as any)).rejects.toEqual(expect.objectContaining({ message: 'Student lifecycle changed concurrently. Please retry the operation.' }));
   });
 });
