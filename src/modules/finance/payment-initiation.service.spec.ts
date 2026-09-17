@@ -98,4 +98,19 @@ describe('PaymentInitiationService', () => {
     await expect(service.initiate('student-1', dto, 'guardian-user', [RoleName.GUARDIAN], 'idem-2'))
       .rejects.toBeInstanceOf(ServiceUnavailableException);
   });
+
+  it('does not mark the payment failed when the provider accepted but local state persistence failed', async () => {
+    const { service, prisma, moolre, reservationTx } = makeService();
+    const persistenceError = new Error('database unavailable');
+    prisma.$transaction
+      .mockImplementationOnce(async (callback: (tx: any) => unknown) => callback(reservationTx))
+      .mockRejectedValueOnce(persistenceError);
+
+    await expect(service.initiate('student-1', dto, 'guardian-user', [RoleName.GUARDIAN], 'idem-3'))
+      .rejects.toBeInstanceOf(ServiceUnavailableException);
+
+    expect(moolre.initiatePayment).toHaveBeenCalledTimes(1);
+    expect(reservationTx.payment.update).not.toHaveBeenCalled();
+    expect(reservationTx.paymentProviderAttempt.update).not.toHaveBeenCalled();
+  });
 });
