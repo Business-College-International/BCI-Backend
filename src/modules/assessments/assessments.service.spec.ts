@@ -107,7 +107,7 @@ describe('AssessmentsService', () => {
 
     await expect(service.enterResults('assessment-1', {
       results: [{ studentId: 'student-1', score: 51 }],
-    }, 'teacher-user', [RoleName.TEACHER])).rejects.toBeInstanceOf(BadRequestException);
+    }, 'office-user', [RoleName.OFFICE])).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('locks the term before entering assessment results', async () => {
