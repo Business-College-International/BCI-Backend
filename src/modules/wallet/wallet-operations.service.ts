@@ -158,4 +158,181 @@ export class WalletOperationsService {
       throw error;
     }
   }
+  async reverse(
+    studentId: string,
+    transactionId: string,
+    dto: { reason: string },
+    actorUserId: string,
+    roles: RoleName[],
+    idempotencyKey: string,
+  ) {
+    if (!roles.includes(RoleName.DIRECTOR) && !roles.includes(RoleName.OFFICE) && !roles.includes(RoleName.ACCOUNTANT)) {
+      throw new ForbiddenException('Only authorized finance/office staff may reverse a wallet transaction.');
+    }
+
+    const normalizedKey = idempotencyKey?.trim();
+    if (!normalizedKey) {
+      throw new ConflictException('An Idempotency-Key header is required for wallet reversals.');
+    }
+
+    const reason = dto.reason?.trim();
+    if (!reason) throw new BadRequestException('A reversal reason is required.');
+
+    const requestHash = createHash('sha256')
+      .update(JSON.stringify({ studentId, transactionId, reason }))
+      .digest('hex');
+
+    try {
+      const result = await this.prisma.$transaction(async (tx) => {
+        const existingKey = await tx.idempotencyKey.findUnique({
+          where: {
+            userId_key_operation: {
+              userId: actorUserId,
+              key: normalizedKey,
+              operation: 'wallet.reversal',
+            },
+          },
+        });
+        if (existingKey) {
+          if (existingKey.requestHash !== requestHash) {
+            throw new ConflictException('The wallet reversal Idempotency-Key was already used with different parameters.');
+          }
+          if (existingKey.responseJson) return { existing: existingKey.responseJson as Record<string, unknown> };
+          throw new ConflictException('An identical wallet reversal is already in progress.');
+        }
+
+        await tx.idempotencyKey.create({
+          data: {
+            userId: actorUserId,
+            key: normalizedKey,
+            operation: 'wallet.reversal',
+            requestHash,
+          },
+        });
+
+        await tx.$queryRaw`SELECT "studentId" FROM "Wallet" WHERE "studentId" = ${studentId} FOR UPDATE`;
+
+        const wallet = await tx.wallet.findUnique({
+          where: { studentId },
+          include: {
+            transactions: {
+              orderBy: { createdAt: 'asc' },
+              select: { id: true, type: true, direction: true, amount: true, reversalOfId: true, paymentId: true },
+            },
+          },
+        });
+        if (!wallet) throw new NotFoundException('Student wallet does not exist.');
+
+        const unresolvedLedgerEntry = wallet.transactions.find((transaction) =>
+          transaction.direction === null ||
+          (transaction.type === WalletTransactionType.REVERSAL && !transaction.reversalOfId),
+        );
+        if (unresolvedLedgerEntry) {
+          throw new ConflictException('Wallet ledger contains transactions without complete signed effects. Reconciliation is required before reversal.');
+        }
+
+        const original = wallet.transactions.find((transaction) => transaction.id === transactionId);
+        if (!original) throw new NotFoundException('Wallet transaction not found.');
+
+        if (original.type === WalletTransactionType.REVERSAL) {
+          throw new ConflictException('A reversal transaction cannot itself be reversed.');
+        }
+        if (!original.direction) {
+          throw new ConflictException('The selected wallet transaction does not have a signed ledger effect.');
+        }
+        if (wallet.transactions.some((transaction) => transaction.reversalOfId === original.id)) {
+          throw new ConflictException('The selected wallet transaction has already been reversed.');
+        }
+
+        const balance = wallet.transactions.reduce((running, transaction) => {
+          if (transaction.direction === WalletTransactionDirection.CREDIT) return running.plus(transaction.amount);
+          return running.minus(transaction.amount);
+        }, new Prisma.Decimal(0));
+
+        const reversalDirection = original.direction === WalletTransactionDirection.CREDIT
+          ? WalletTransactionDirection.DEBIT
+          : WalletTransactionDirection.CREDIT;
+        const nextBalance = reversalDirection === WalletTransactionDirection.CREDIT
+          ? balance.plus(original.amount)
+          : balance.minus(original.amount);
+
+        if (nextBalance.lt(0)) {
+          throw new ConflictException('Reversing this wallet transaction would create a negative balance. Reconciliation is required before reversal.');
+        }
+
+        const transaction = await tx.walletTransaction.create({
+          data: {
+            walletId: studentId,
+            type: WalletTransactionType.REVERSAL,
+            direction: reversalDirection,
+            amount: original.amount,
+            reversalOfId: original.id,
+            processedBy: actorUserId,
+            note: reason,
+          },
+        });
+
+        const response = {
+          transactionId: transaction.id,
+          reversalOfId: original.id,
+          studentId,
+          amount: transaction.amount.toString(),
+          currency: wallet.currency,
+          direction: reversalDirection,
+          balance: nextBalance.toFixed(2),
+          status: 'COMPLETED',
+        };
+
+        await tx.auditLog.create({
+          data: {
+            actorUserId,
+            action: 'RECONCILE',
+            entityType: 'WalletTransaction',
+            entityId: transaction.id,
+            beforeJson: {
+              balance: balance.toFixed(2),
+              originalTransactionId: original.id,
+              originalDirection: original.direction,
+            },
+            afterJson: {
+              balance: nextBalance.toFixed(2),
+              reversalOfId: original.id,
+              direction: reversalDirection,
+              amount: original.amount.toFixed(2),
+              reason,
+            },
+          },
+        });
+
+        await tx.idempotencyKey.update({
+          where: {
+            userId_key_operation: {
+              userId: actorUserId,
+              key: normalizedKey,
+              operation: 'wallet.reversal',
+            },
+          },
+          data: {
+            responseJson: response,
+            statusCode: 200,
+            completedAt: new Date(),
+          },
+        });
+
+        return { response };
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 5000, timeout: 10000 });
+
+      return 'existing' in result ? result.existing : result.response;
+    } catch (error) {
+      const code = (error as { code?: string }).code;
+      if (code === 'P2034') {
+        throw new ConflictException('Wallet changed concurrently. Please retry the reversal.');
+      }
+      if (code === 'P2002') {
+        throw new ConflictException('The selected wallet transaction has already been reversed, or this Idempotency-Key is already being processed.');
+      }
+      throw error;
+    }
+  }
+
 }

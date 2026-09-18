@@ -166,4 +166,80 @@ describe('WalletOperationsService', () => {
     }));
     expect(tx.auditLog.create).toHaveBeenCalled();
   });
+  it('reverses a signed credit exactly once and returns the adjusted balance', async () => {
+    tx.wallet.findUnique.mockResolvedValue({
+      studentId: 'student-1',
+      currency: 'GHS',
+      transactions: [
+        { id: 'top-up', type: WalletTransactionType.TOP_UP, direction: WalletTransactionDirection.CREDIT, amount: new Prisma.Decimal('100'), reversalOfId: null, paymentId: 'payment-1' },
+        { id: 'withdrawal', type: WalletTransactionType.WITHDRAWAL, direction: WalletTransactionDirection.DEBIT, amount: new Prisma.Decimal('75'), reversalOfId: null, paymentId: null },
+      ],
+    });
+    tx.walletTransaction.create.mockResolvedValue({
+      id: 'reversal-1',
+      amount: new Prisma.Decimal('100'),
+    });
+
+    await expect(
+      new WalletOperationsService(prisma).reverse(
+        'student-1',
+        'top-up',
+        { reason: 'Provider payment was duplicated.' },
+        'user-1',
+        [RoleName.OFFICE],
+        'reversal-key-1',
+      ),
+    ).resolves.toMatchObject({
+      transactionId: 'reversal-1',
+      reversalOfId: 'top-up',
+      direction: WalletTransactionDirection.DEBIT,
+      balance: '0.00',
+    });
+  });
+
+  it('blocks a reversal that would create a negative wallet balance', async () => {
+    tx.wallet.findUnique.mockResolvedValue({
+      studentId: 'student-1',
+      currency: 'GHS',
+      transactions: [
+        { id: 'top-up', type: WalletTransactionType.TOP_UP, direction: WalletTransactionDirection.CREDIT, amount: new Prisma.Decimal('50'), reversalOfId: null, paymentId: 'payment-1' },
+        { id: 'withdrawal', type: WalletTransactionType.WITHDRAWAL, direction: WalletTransactionDirection.DEBIT, amount: new Prisma.Decimal('50'), reversalOfId: null, paymentId: null },
+      ],
+    });
+
+    await expect(
+      new WalletOperationsService(prisma).reverse(
+        'student-1',
+        'top-up',
+        { reason: 'Duplicate provider settlement.' },
+        'user-1',
+        [RoleName.ACCOUNTANT],
+        'reversal-key-2',
+      ),
+    ).rejects.toThrow(ConflictException);
+    expect(tx.walletTransaction.create).not.toHaveBeenCalled();
+  });
+
+  it('does not reverse an already reversed transaction', async () => {
+    tx.wallet.findUnique.mockResolvedValue({
+      studentId: 'student-1',
+      currency: 'GHS',
+      transactions: [
+        { id: 'top-up', type: WalletTransactionType.TOP_UP, direction: WalletTransactionDirection.CREDIT, amount: new Prisma.Decimal('50'), reversalOfId: null, paymentId: 'payment-1' },
+        { id: 'reversal-1', type: WalletTransactionType.REVERSAL, direction: WalletTransactionDirection.DEBIT, amount: new Prisma.Decimal('50'), reversalOfId: 'top-up', paymentId: null },
+      ],
+    });
+
+    await expect(
+      new WalletOperationsService(prisma).reverse(
+        'student-1',
+        'top-up',
+        { reason: 'Second correction.' },
+        'user-1',
+        [RoleName.OFFICE],
+        'reversal-key-3',
+      ),
+    ).rejects.toThrow(ConflictException);
+  });
+
 });
