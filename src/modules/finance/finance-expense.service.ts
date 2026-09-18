@@ -102,6 +102,7 @@ export class FinanceExpenseService {
   async submit(id: string, actorUserId: string, roles: RoleName[]) {
     this.requireRole(roles, ENTRY_ROLES);
     return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Expense" WHERE id = ${id} FOR UPDATE`;
       const expense = await tx.expense.findUnique({ where: { id } });
       if (!expense) throw new NotFoundException('Expense not found.');
       if (expense.enteredBy !== actorUserId) throw new ForbiddenException('Only the expense submitter can submit this expense.');

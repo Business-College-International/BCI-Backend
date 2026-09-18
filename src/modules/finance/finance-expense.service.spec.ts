@@ -5,6 +5,7 @@ import { FinanceExpenseService } from './finance-expense.service';
 
 function makeTx() {
   return {
+    $queryRaw: jest.fn().mockResolvedValue([]),
     idempotencyKey: { upsert: jest.fn(), update: jest.fn() },
     expense: { create: jest.fn(), findUnique: jest.fn(), update: jest.fn(), updateMany: jest.fn(), findMany: jest.fn() },
     auditLog: { create: jest.fn() },
@@ -65,6 +66,39 @@ describe('FinanceExpenseService', () => {
 
     await expect(service.submit('e1', 'other', [RoleName.OFFICE]))
       .rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('locks an expense row before submitting it', async () => {
+    const tx = makeTx();
+    tx.expense.findUnique.mockResolvedValue({ id: 'e1', enteredBy: 'owner', status: ExpenseStatus.DRAFT });
+    tx.expense.update.mockResolvedValue({ id: 'e1', enteredBy: 'owner', status: ExpenseStatus.SUBMITTED });
+    tx.auditLog.create.mockResolvedValue({});
+    const prisma = { $transaction: jest.fn(async (callback: (value: typeof tx) => unknown) => callback(tx)) };
+    const service = new FinanceExpenseService(prisma as never);
+
+    await service.submit('e1', 'owner', [RoleName.OFFICE]);
+
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(tx.expense.update).toHaveBeenCalled();
+  });
+
+  it('locks an expense row before making an approval decision', async () => {
+    const tx = makeTx();
+    tx.expense.findUnique.mockResolvedValue({ id: 'e1', enteredBy: 'owner', status: ExpenseStatus.SUBMITTED });
+    tx.expense.updateMany.mockResolvedValue({ count: 1 });
+    tx.expense.findUnique.mockResolvedValueOnce({ id: 'e1', enteredBy: 'owner', status: ExpenseStatus.SUBMITTED });
+    tx.expense.findUnique.mockResolvedValueOnce({ id: 'e1', enteredBy: 'owner', status: ExpenseStatus.APPROVED });
+    tx.auditLog.create.mockResolvedValue({});
+    const prisma = { $transaction: jest.fn(async (callback: (value: typeof tx) => unknown) => callback(tx)) };
+    const service = new FinanceExpenseService(prisma as never);
+
+    await service.decide('e1', 'APPROVED', 'approver', [RoleName.ACCOUNTANT]);
+
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(tx.expense.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'e1', status: ExpenseStatus.SUBMITTED },
+      data: expect.objectContaining({ status: ExpenseStatus.APPROVED }),
+    }));
   });
 
   it('prevents the submitter from approving their own expense', async () => {
