@@ -11,7 +11,7 @@ function mockPrisma() {
     studentInvoice: { findMany: jest.fn() },
     payment: { findMany: jest.fn() },
     paymentAllocation: { findMany: jest.fn() },
-    walletTransaction: { findMany: jest.fn() },
+    walletTransaction: { findMany: jest.fn().mockResolvedValue([]) },
   } as any;
 }
 
