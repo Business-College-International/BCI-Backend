@@ -40,6 +40,7 @@ function makePrisma(tx: MockTx): any {
     enrolment: tx.enrolment,
     teacherAssignment: tx.teacherAssignment,
     assessmentResult: { findMany: jest.fn() },
+    enrolment: { findFirst: jest.fn(), findMany: jest.fn() },
   };
 }
 
