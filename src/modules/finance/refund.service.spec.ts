@@ -173,6 +173,50 @@ describe('RefundService', () => {
     }));
   });
 
+  it('locks the payment and verifies refund capacity before provider execution', async () => {
+    const prisma = mockPrisma();
+    const deps = mockDeps();
+    prisma.$transaction.mockImplementation(async (callback: (client: any) => unknown) => callback(prisma));
+    prisma.refund.findUnique
+      .mockResolvedValueOnce({ id: 'refund-1', paymentId: 'payment-1' })
+      .mockResolvedValueOnce({
+        id: 'refund-1',
+        status: PaymentStatus.PENDING,
+        approvedBy: 'approver-1',
+        amount: new Prisma.Decimal('40.00'),
+        paymentId: 'payment-1',
+        payment: {
+          id: 'payment-1',
+          status: PaymentStatus.SUCCEEDED,
+          amount: new Prisma.Decimal('100.00'),
+          purpose: PaymentPurpose.FEE,
+          guardianId: 'guardian-1',
+          currency: 'GHS',
+          refunds: [
+            { id: 'refund-1', amount: new Prisma.Decimal('40.00'), status: PaymentStatus.PENDING },
+            { id: 'refund-2', amount: new Prisma.Decimal('60.00'), status: PaymentStatus.SUCCEEDED },
+          ],
+        },
+      });
+    prisma.refund.updateMany.mockResolvedValue({ count: 1 });
+    prisma.person.findUnique.mockResolvedValue({ phone: '0240000000' });
+    deps.disbursements.initiateTransfer.mockResolvedValue({
+      providerReference: 'moolre-ref-locked',
+      status: 'PENDING',
+      mock: true,
+    });
+    prisma.refund.update.mockResolvedValue({ id: 'refund-1', status: PaymentStatus.PROCESSING, providerReference: 'moolre-ref-locked' });
+
+    const service = new RefundService(prisma, deps.disbursements, deps.journal);
+    await service.executeRefund('refund-1', 'operator-1', [RoleName.ACCOUNTANT]);
+
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(prisma.refund.updateMany).toHaveBeenCalledWith({
+      where: { id: 'refund-1', status: PaymentStatus.PENDING, approvedBy: { not: null } },
+      data: { status: PaymentStatus.PROCESSING },
+    });
+  });
+
   it('moves an approved refund to processing and records the provider reference', async () => {
     const prisma = mockPrisma();
     const deps = mockDeps();

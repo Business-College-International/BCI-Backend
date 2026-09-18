@@ -125,47 +125,89 @@ export class RefundService {
   async executeRefund(refundId: string, actorUserId: string, roles: RoleName[]) {
     this.assertManage(roles);
 
-    const current = await this.prisma.refund.findUnique({
-      where: { id: refundId },
-      include: { payment: { select: { id: true, status: true, amount: true, purpose: true, guardianId: true } } },
-    });
-    if (!current) throw new NotFoundException('Refund not found.');
-    if (current.status !== PaymentStatus.PENDING || !current.approvedBy) {
-      throw new ConflictException('Only an approved pending refund can be executed.');
-    }
+    const reservation = await this.prisma.$transaction(async (tx) => {
+      const refundLookup = await tx.refund.findUnique({
+        where: { id: refundId },
+        select: { paymentId: true },
+      });
+      if (!refundLookup) throw new NotFoundException('Refund not found.');
 
-    const recipient = await this.resolveRecipientPhone(current.payment.guardianId, current.payment.id);
+      await tx.$queryRaw`SELECT id FROM "Payment" WHERE id = ${refundLookup.paymentId} FOR UPDATE`;
 
-    const refund = await this.prisma.$transaction(async (tx) => {
+      const current = await tx.refund.findUnique({
+        where: { id: refundId },
+        include: {
+          payment: {
+            select: {
+              id: true,
+              status: true,
+              amount: true,
+              purpose: true,
+              guardianId: true,
+              currency: true,
+              refunds: { select: { id: true, amount: true, status: true } },
+            },
+          },
+        },
+      });
+      if (!current) throw new NotFoundException('Refund not found.');
+      if (current.status !== PaymentStatus.PENDING || !current.approvedBy) {
+        throw new ConflictException('Only an approved pending refund can be executed.');
+      }
+      if (current.payment.status !== PaymentStatus.SUCCEEDED) {
+        throw new ConflictException('The original payment is no longer successfully settled.');
+      }
+
+      const reservedAmount = current.payment.refunds
+        .filter((item) => item.id !== current.id && item.status !== PaymentStatus.FAILED && item.status !== PaymentStatus.CANCELLED)
+        .reduce((sum, item) => sum.plus(item.amount), new Prisma.Decimal(0));
+      if (reservedAmount.plus(current.amount).gt(current.payment.amount)) {
+        throw new ConflictException('Refund execution would exceed the remaining refundable payment amount.');
+      }
+
       const transition = await tx.refund.updateMany({
         where: { id: refundId, status: PaymentStatus.PENDING, approvedBy: { not: null } },
         data: { status: PaymentStatus.PROCESSING },
       });
       if (transition.count !== 1) throw new ConflictException('Refund is already being executed.');
-      return current;
+
+      return {
+        refundId: current.id,
+        amount: current.amount.toString(),
+        paymentId: current.payment.id,
+        guardianId: current.payment.guardianId,
+        purpose: current.payment.purpose,
+        currency: current.payment.currency,
+      };
+    }, {
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      maxWait: 5000,
+      timeout: 10000,
     });
 
-    const referenceId = refundReference(refund.id);
+    const recipient = await this.resolveRecipientPhone(reservation.guardianId, reservation.paymentId);
+
+    const referenceId = refundReference(reservation.refundId);
     let result: Awaited<ReturnType<MoolreDisbursementService['initiateTransfer']>>;
     try {
       result = await this.disbursements.initiateTransfer({
         referenceId,
-        amountGhs: refund.amount.toFixed(2),
+        amountGhs: new Prisma.Decimal(reservation.amount).toFixed(2),
         recipientPhone: recipient,
-        narration: `BCI refund ${refund.id}`,
+        narration: `BCI refund ${reservation.refundId}`,
       });
     } catch {
       try {
         const status = await this.disbursements.getTransferStatus(referenceId);
         if (status.status === 'FAILED') {
-          return this.failRefund(refund.id, actorUserId, 'PROVIDER_REFUND_FAILED');
+          return this.failRefund(reservation.refundId, actorUserId, 'PROVIDER_REFUND_FAILED');
         }
         if (status.status === 'SUCCESSFUL') {
-          return this.settleSuccessfulRefund(refund.id, actorUserId, status.providerReference);
+          return this.settleSuccessfulRefund(reservation.refundId, actorUserId, status.providerReference);
         }
 
         return this.prisma.refund.update({
-          where: { id: refund.id },
+          where: { id: reservation.refundId },
           data: { providerReference: status.providerReference },
         });
       } catch (statusError) {
@@ -175,18 +217,17 @@ export class RefundService {
     }
 
     if (result.status === 'FAILED') {
-      return this.failRefund(refund.id, actorUserId, 'PROVIDER_REFUND_FAILED');
+      return this.failRefund(reservation.refundId, actorUserId, 'PROVIDER_REFUND_FAILED');
     }
     if (result.status === 'SUCCESSFUL') {
-      return this.settleSuccessfulRefund(refund.id, actorUserId, result.providerReference);
+      return this.settleSuccessfulRefund(reservation.refundId, actorUserId, result.providerReference);
     }
 
     return this.prisma.refund.update({
-      where: { id: refund.id },
+      where: { id: reservation.refundId },
       data: { providerReference: result.providerReference },
     });
   }
-
   async reconcileRefund(refundId: string, actorUserId: string, roles: RoleName[]) {
     this.assertManage(roles);
     const refund = await this.prisma.refund.findUnique({
