@@ -86,7 +86,7 @@ describe('GuardiansService profile boundary', () => {
       },
       auditLog: { create: jest.fn().mockResolvedValue({}) },
     };
-    prisma.$transaction.mockImplementation(async (callback: (tx: typeof tx) => unknown) => callback(tx));
+    prisma.$transaction.mockImplementation(async (callback: (tx: any) => unknown) => callback(tx));
 
     await new GuardiansService(prisma as never).updateMyProfile('user-1', {
       firstName: 'Ama',
