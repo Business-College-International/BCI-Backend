@@ -1,5 +1,4 @@
 import { ConflictException, BadRequestException, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
 import { StaffManagementService } from './staff-management.service';
 
 describe('StaffManagementService', () => {
