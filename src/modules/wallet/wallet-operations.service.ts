@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, RoleName, WalletTransactionType } from '@prisma/client';
+import { Prisma, RoleName, WalletTransactionDirection, WalletTransactionType } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { PrismaService } from '../../prisma.service';
 import { WithdrawWalletDto } from './dto/withdraw-wallet.dto';
@@ -66,25 +66,30 @@ export class WalletOperationsService {
           },
         });
 
+        await tx.$queryRaw`SELECT "studentId" FROM "Wallet" WHERE "studentId" = ${studentId} FOR UPDATE`;
+
         const wallet = await tx.wallet.findUnique({
           where: { studentId },
           include: {
             transactions: {
               orderBy: { createdAt: 'asc' },
-              select: { id: true, type: true, amount: true },
+              select: { id: true, type: true, direction: true, amount: true, reversalOfId: true, paymentId: true },
             },
           },
         });
         if (!wallet) throw new NotFoundException('Student wallet does not exist.');
 
-        const hasUnsupportedReversal = wallet.transactions.some((transaction) => transaction.type === WalletTransactionType.REVERSAL);
-        if (hasUnsupportedReversal) {
-          throw new ConflictException('Wallet contains reversal transactions that require ledger reconciliation before withdrawal.');
+        const unresolvedLedgerEntry = wallet.transactions.find((transaction) =>
+          transaction.direction === null ||
+          (transaction.type === WalletTransactionType.REVERSAL && !transaction.reversalOfId),
+        );
+        if (unresolvedLedgerEntry) {
+          throw new ConflictException('Wallet ledger contains transactions without complete signed effects. Reconciliation is required before withdrawal.');
         }
 
         const balance = wallet.transactions.reduce((running, transaction) => {
-          if (transaction.type === WalletTransactionType.TOP_UP) return running.plus(transaction.amount);
-          if (transaction.type === WalletTransactionType.WITHDRAWAL) return running.minus(transaction.amount);
+          if (transaction.direction === WalletTransactionDirection.CREDIT) return running.plus(transaction.amount);
+          if (transaction.direction === WalletTransactionDirection.DEBIT) return running.minus(transaction.amount);
           return running;
         }, new Prisma.Decimal(0));
 
@@ -96,6 +101,7 @@ export class WalletOperationsService {
           data: {
             walletId: studentId,
             type: WalletTransactionType.WITHDRAWAL,
+            direction: WalletTransactionDirection.DEBIT,
             amount,
             processedBy: actorUserId,
             note: dto.note?.trim() || 'Office wallet withdrawal',
