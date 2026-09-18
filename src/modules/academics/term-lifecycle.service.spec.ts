@@ -17,6 +17,7 @@ function makePrisma(tx: any, transactionError?: unknown) {
 describe('TermLifecycleService', () => {
   it('rejects overlapping term dates', async () => {
     const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'year-1' }]),
       academicYear: { findUnique: jest.fn().mockResolvedValue({ id: 'year-1', startsAt: new Date('2026-09-01'), endsAt: new Date('2027-08-31') }) },
       term: { findFirst: jest.fn().mockResolvedValue({ id: 'term-1', code: 'T1' }) },
     };
@@ -26,6 +27,7 @@ describe('TermLifecycleService', () => {
 
   it('does not close draft terms when opening another term', async () => {
     const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'term-2' }]),
       term: {
         findUnique: jest.fn().mockResolvedValue({ id: 'term-2', academicYearId: 'year-1', status: 'DRAFT' }),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
@@ -36,6 +38,61 @@ describe('TermLifecycleService', () => {
     const service = new TermLifecycleService(makePrisma(tx) as never);
     await service.transitionTerm('term-2', 'OPEN' as any, 'actor-1');
     expect(tx.term.updateMany).toHaveBeenCalledWith({ where: { academicYearId: 'year-1', status: 'OPEN' }, data: { status: 'CLOSED' } });
+  });
+
+  it('locks the academic year before creating a term', async () => {
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'year-1' }]),
+      academicYear: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'year-1',
+          startsAt: new Date('2026-09-01'),
+          endsAt: new Date('2027-08-31'),
+        }),
+      },
+      term: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({
+          id: 'term-new',
+          code: 'T2',
+          name: 'Term 2',
+          startsAt: new Date('2027-01-01'),
+          endsAt: new Date('2027-03-31'),
+          status: 'DRAFT',
+        }),
+      },
+      auditLog: { create: jest.fn().mockResolvedValue({}) },
+    };
+    const service = new TermLifecycleService(makePrisma(tx) as never);
+
+    await service.createTerm('year-1', {
+      code: 'T2',
+      name: 'Term 2',
+      startsAt: '2027-01-01',
+      endsAt: '2027-03-31',
+      status: 'DRAFT',
+    } as any, 'actor-1');
+
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(tx.term.create).toHaveBeenCalled();
+  });
+
+  it('locks the academic year and term before transitioning a term', async () => {
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'term-2' }]),
+      term: {
+        findUnique: jest.fn().mockResolvedValue({ id: 'term-2', academicYearId: 'year-1', status: 'DRAFT' }),
+        updateMany: jest.fn(),
+        update: jest.fn().mockResolvedValue({ id: 'term-2', status: 'OPEN' }),
+      },
+      auditLog: { create: jest.fn().mockResolvedValue({}) },
+    };
+    const service = new TermLifecycleService(makePrisma(tx) as never);
+
+    await service.transitionTerm('term-2', 'OPEN' as any, 'actor-1');
+
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(tx.term.updateMany).toHaveBeenCalled();
   });
 
   it('rejects invalid state transitions', async () => {
