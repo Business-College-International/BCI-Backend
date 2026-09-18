@@ -9,7 +9,7 @@ type MockTx = {
   staff: { findUnique: jest.Mock };
   teacherAssignment: { findFirst: jest.Mock; findMany: jest.Mock };
   assessment: { create: jest.Mock; findUnique: jest.Mock };
-  enrolment: { findMany: jest.Mock };
+  enrolment: { findFirst: jest.Mock; findMany: jest.Mock };
   assessmentResult: { upsert: jest.Mock; findMany: jest.Mock };
   auditLog: { create: jest.Mock };
 };
@@ -22,7 +22,7 @@ function makeTx(): MockTx {
     staff: { findUnique: jest.fn() },
     teacherAssignment: { findFirst: jest.fn(), findMany: jest.fn() },
     assessment: { create: jest.fn(), findUnique: jest.fn() },
-    enrolment: { findMany: jest.fn() },
+    enrolment: { findFirst: jest.fn(), findMany: jest.fn() },
     assessmentResult: { upsert: jest.fn(), findMany: jest.fn() },
     auditLog: { create: jest.fn() },
   };
@@ -40,7 +40,6 @@ function makePrisma(tx: MockTx): any {
     enrolment: tx.enrolment,
     teacherAssignment: tx.teacherAssignment,
     assessmentResult: { findMany: jest.fn() },
-    enrolment: { findFirst: jest.fn(), findMany: jest.fn() },
   };
 }
 
