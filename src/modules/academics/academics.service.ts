@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma, RoleName, TermStatus } from '@prisma/client';
+import { RoleName, TermStatus } from '@prisma/client';
 import { CreateAcademicYearDto } from './dto/create-academic-year.dto';
 import { CreateClassDto } from './dto/create-class.dto';
 import { CreateTermDto } from './dto/create-term.dto';
