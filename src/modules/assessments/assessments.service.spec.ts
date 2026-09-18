@@ -3,6 +3,7 @@ import { AssessmentType, RoleName } from '@prisma/client';
 import { AssessmentsService } from './assessments.service';
 
 type MockTx = {
+  $queryRaw: jest.Mock;
   term: { findUnique: jest.Mock };
   schoolClass: { findUnique?: jest.Mock };
   subject: { findUnique: jest.Mock };
