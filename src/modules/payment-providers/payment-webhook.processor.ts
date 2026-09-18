@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { randomBytes } from 'node:crypto';
 import { InvoiceStatus, PaymentStatus, Prisma, WalletTransactionDirection, WalletTransactionType } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
 import { NormalizedPaymentWebhook } from './payment-webhook.normalization';
@@ -113,6 +114,29 @@ export class PaymentWebhookProcessor {
       }
 
       if (normalized.paymentStatus === PaymentStatus.SUCCEEDED) {
+        const receipt = await tx.receipt.upsert({
+          where: { paymentId: payment.id },
+          update: {},
+          create: {
+            paymentId: payment.id,
+            receiptNumber: nextReceiptNumber(),
+          },
+          select: { id: true, receiptNumber: true },
+        });
+
+        await tx.auditLog.create({
+          data: {
+            action: 'CREATE',
+            entityType: 'Receipt',
+            entityId: receipt.id,
+            afterJson: {
+              paymentId: payment.id,
+              receiptNumber: receipt.receiptNumber,
+              amount: payment.amount.toFixed(2),
+              currency: payment.currency,
+            },
+          },
+        });
         if (payment.purpose === 'WALLET_TOP_UP') {
           if (!payment.studentId) {
             await tx.providerWebhookEvent.update({
@@ -219,4 +243,9 @@ export class PaymentWebhookProcessor {
       return { applied: true, paymentId: payment.id, status: normalized.paymentStatus };
     });
   }
+}
+
+function nextReceiptNumber() {
+  const year = new Date().getUTCFullYear();
+  return `BCI-RCPT-${year}-${randomBytes(6).toString('hex').toUpperCase()}`;
 }

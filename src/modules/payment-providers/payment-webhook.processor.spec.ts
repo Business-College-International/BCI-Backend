@@ -34,6 +34,8 @@ describe('PaymentWebhookProcessor', () => {
           update: jest.fn().mockResolvedValue({}),
         },
         paymentProviderAttempt: { update: jest.fn().mockResolvedValue({}) },
+        receipt: { upsert: jest.fn().mockResolvedValue({ id: 'receipt-1', receiptNumber: 'BCI-RCPT-2026-TEST' }) },
+        auditLog: { create: jest.fn().mockResolvedValue({}) },
         studentInvoice: {
           findUnique: jest.fn().mockResolvedValue({
             id: 'invoice-1',
@@ -55,6 +57,12 @@ describe('PaymentWebhookProcessor', () => {
     const processor = new PaymentWebhookProcessor(prisma as any);
     await expect(processor.apply(normalized, 'event-1')).resolves.toMatchObject({ applied: true, paymentId: 'payment-1', status: PaymentStatus.SUCCEEDED });
     expect(invoiceUpdate).toHaveBeenCalledWith({ where: { id: 'invoice-1' }, data: { status: InvoiceStatus.PAID } });
+    expect(prisma.receipt.upsert).toHaveBeenCalledWith({
+      where: { paymentId: 'payment-1' },
+      update: {},
+      create: expect.objectContaining({ paymentId: 'payment-1', receiptNumber: expect.stringMatching(/^BCI-RCPT-2026-/) }),
+      select: { id: true, receiptNumber: true },
+    });
   });
 
   it('requires both webhook references to identify the same payment when both are supplied', async () => {
