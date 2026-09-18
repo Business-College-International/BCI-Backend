@@ -7,6 +7,8 @@ describe('WalletService ledger balance', () => {
     return {
       student: { findUnique: jest.fn() },
       guardian: { findUnique: jest.fn() },
+      guardianStudent: { findUnique: jest.fn() },
+      
       wallet: { findUnique: jest.fn() },
       walletTransaction: { findMany: jest.fn() },
     } as any;
