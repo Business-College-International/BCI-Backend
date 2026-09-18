@@ -75,4 +75,77 @@ describe('FinanceIntegrityService', () => {
     expect(report.findings.succeededWithoutReceipt[0].paymentId).toBe('payment-1');
     expect(report.findings.overRefundedPayments).toHaveLength(0);
   });
+  it('detects a succeeded wallet top-up without a corresponding ledger credit', async () => {
+    const prisma = {
+      studentInvoice: { findMany: jest.fn().mockResolvedValue([]) },
+      payment: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'payment-wallet-1',
+            studentId: 'student-1',
+            purpose: 'WALLET_TOP_UP',
+            status: PaymentStatus.SUCCEEDED,
+            amount: decimal('75.00'),
+            completedAt: new Date(),
+            receipt: { id: 'receipt-1', receiptNumber: 'R-1' },
+            refunds: [],
+          },
+        ]),
+      },
+      paymentAllocation: { findMany: jest.fn().mockResolvedValue([]) },
+      walletTransaction: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+    const service = new FinanceIntegrityService(prisma as never);
+
+    const report = await service.getIntegrityReport('accountant-user', [RoleName.ACCOUNTANT]);
+
+    expect(report.findings.successfulWalletTopUpsWithoutLedger).toEqual([
+      { paymentId: 'payment-wallet-1', studentId: 'student-1', amount: '75.00' },
+    ]);
+    expect(report.healthy).toBe(false);
+  });
+
+  it('detects malformed wallet effects and a negative balance', async () => {
+    const prisma = {
+      studentInvoice: { findMany: jest.fn().mockResolvedValue([]) },
+      payment: { findMany: jest.fn().mockResolvedValue([]) },
+      paymentAllocation: { findMany: jest.fn().mockResolvedValue([]) },
+      walletTransaction: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'wallet-tx-1',
+            walletId: 'student-1',
+            type: 'TOP_UP',
+            direction: 'DEBIT',
+            amount: decimal('50.00'),
+            paymentId: null,
+            reversalOfId: null,
+            payment: null,
+            reversalOf: null,
+          },
+          {
+            id: 'wallet-tx-2',
+            walletId: 'student-1',
+            type: 'WITHDRAWAL',
+            direction: 'DEBIT',
+            amount: decimal('75.00'),
+            paymentId: null,
+            reversalOfId: null,
+            payment: null,
+            reversalOf: null,
+          },
+        ]),
+      },
+    };
+    const service = new FinanceIntegrityService(prisma as never);
+
+    const report = await service.getIntegrityReport('accountant-user', [RoleName.ACCOUNTANT]);
+
+    expect(report.findings.invalidWalletDirections).toHaveLength(1);
+    expect(report.findings.negativeWalletBalances).toEqual([
+      { studentId: 'student-1', balance: '-125.00' },
+    ]);
+    expect(report.healthy).toBe(false);
+  });
+
 });
