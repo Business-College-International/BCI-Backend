@@ -68,6 +68,8 @@ export class FinanceReceivablesService {
     this.assertManagementScope(roles, actorUserId);
     try {
       return await this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM "StudentInvoice" WHERE id = ${invoiceId} FOR UPDATE`;
+
         const invoice = await tx.studentInvoice.findUnique({
           where: { id: invoiceId },
           include: { allocations: true },
