@@ -334,6 +334,8 @@ export class StudentsService {
 
   async withdraw(studentId: string, actorUserId: string, dto: WithdrawStudentDto) {
     return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Student" WHERE id = ${studentId} FOR UPDATE`;
+
       const student = await tx.student.findUnique({
         where: { id: studentId },
         include: {
