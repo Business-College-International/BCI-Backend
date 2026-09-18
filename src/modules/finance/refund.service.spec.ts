@@ -177,9 +177,7 @@ describe('RefundService', () => {
     const prisma = mockPrisma();
     const deps = mockDeps();
     prisma.$transaction.mockImplementation(async (callback: (client: any) => unknown) => callback(prisma));
-    prisma.refund.findUnique
-      .mockResolvedValueOnce({ id: 'refund-1', paymentId: 'payment-1' })
-      .mockResolvedValueOnce({
+    prisma.refund.findUnique.mockResolvedValue({
         id: 'refund-1',
         status: PaymentStatus.PENDING,
         approvedBy: 'approver-1',
