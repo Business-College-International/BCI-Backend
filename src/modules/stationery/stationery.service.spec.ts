@@ -2,20 +2,24 @@ import { BadRequestException, ForbiddenException, ServiceUnavailableException } 
 import { Prisma, RoleName } from '@prisma/client';
 import { StationeryService } from './stationery.service';
 
-function makeTx() {
+function makeTx(): any {
   return {
     stationeryItem: { create: jest.fn(), findUnique: jest.fn(), update: jest.fn(), findMany: jest.fn() },
     stockMovement: { create: jest.fn() },
     auditLog: { create: jest.fn() },
     guardian: { findUnique: jest.fn() },
     guardianStudent: { findUnique: jest.fn() },
-    stationeryOrder: { create: jest.fn(), findMany: jest.fn() },
+    stationeryOrder: { create: jest.fn(), findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
+    idempotencyKey: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
+    payment: { create: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
+    paymentProviderAttempt: { create: jest.fn(), update: jest.fn() },
+    person: { findUnique: jest.fn() },
   };
 }
 
 describe('StationeryService', () => {
   it('blocks stock management for teachers', async () => {
-    const service = new StationeryService({} as never);
+    const service = new StationeryService({} as never, {} as never);
     await expect(service.createItem({ sku: 'PEN-01', name: 'Pen', price: 2 }, 'teacher', [RoleName.TEACHER]))
       .rejects.toBeInstanceOf(ForbiddenException);
   });
