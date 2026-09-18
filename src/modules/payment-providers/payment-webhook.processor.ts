@@ -209,6 +209,30 @@ export class PaymentWebhookProcessor {
           });
         }
 
+        if (payment.purpose === 'STATIONERY') {
+          const order = await tx.stationeryOrder.findFirst({
+            where: { paymentId: payment.id },
+            select: { id: true, status: true, totalAmount: true, studentId: true, guardianId: true },
+          });
+          if (order) {
+            if (!order.totalAmount.eq(payment.amount) || order.studentId !== payment.studentId || order.guardianId !== payment.guardianId) {
+              throw new Error('Stationery order does not match the settled payment.');
+            }
+            if (order.status === 'DRAFT') {
+              await tx.stationeryOrder.update({ where: { id: order.id }, data: { status: 'PAID' } });
+              await tx.auditLog.create({
+                data: {
+                  action: 'RECONCILE',
+                  entityType: 'StationeryOrder',
+                  entityId: order.id,
+                  afterJson: { paymentId: payment.id, status: 'PAID' },
+                },
+              });
+            } else if (!['PAID', 'READY_FOR_COLLECTION', 'COLLECTED'].includes(order.status)) {
+              throw new Error('Stationery order ' + order.id + ' is in unexpected status ' + order.status + ' after payment settlement.');
+            }
+          }
+        }
         const invoiceIds = [...new Set(payment.allocations.map((allocation) => allocation.invoiceId))];
         for (const invoiceId of invoiceIds) {
           const invoice = await tx.studentInvoice.findUnique({

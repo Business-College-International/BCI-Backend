@@ -275,5 +275,43 @@ describe('PaymentWebhookProcessor', () => {
 
     expect(walletTransactionFind).toHaveBeenCalledWith({ where: { paymentId: 'payment-1' }, select: expect.any(Object) });
   });
+  it('marks the linked stationery order paid after verified settlement', async () => {
+    const orderUpdate = jest.fn().mockResolvedValue({});
+    const prisma = {
+      $transaction: jest.fn(async (callback: (tx: any) => unknown) => callback({
+        $executeRaw: jest.fn().mockResolvedValue([]),
+        providerWebhookEvent: {
+          findUnique: jest.fn().mockResolvedValue({ id: 'event-stationery-1', processedAt: null }),
+          update: jest.fn().mockResolvedValue({}),
+        },
+        payment: {
+          findFirst: jest.fn().mockResolvedValue({ id: 'payment-stationery-1' }),
+          findUnique: jest.fn().mockResolvedValue({
+            id: 'payment-stationery-1', amount: new Prisma.Decimal('25.00'), currency: 'GHS',
+            purpose: 'STATIONERY', studentId: 'student-1', guardianId: 'guardian-1', status: PaymentStatus.PROCESSING,
+            attempts: [], allocations: [],
+          }),
+          update: jest.fn().mockResolvedValue({}),
+        },
+        paymentProviderAttempt: { update: jest.fn().mockResolvedValue({}) },
+        receipt: { upsert: jest.fn().mockResolvedValue({ id: 'receipt-2', receiptNumber: 'BCI-RCPT-2026-TEST-2' }) },
+        auditLog: { create: jest.fn().mockResolvedValue({}) },
+        stationeryOrder: {
+          findFirst: jest.fn().mockResolvedValue({ id: 'order-1', status: 'DRAFT', totalAmount: new Prisma.Decimal('25.00'), studentId: 'student-1', guardianId: 'guardian-1' }),
+          update: orderUpdate,
+        },
+        studentInvoice: { findUnique: jest.fn() },
+      })),
+    };
+
+    const processor = new PaymentWebhookProcessor(prisma as any);
+    await expect(processor.apply({ ...normalized, amount: '25.00', clientReference: 'stationery-client-ref' }, 'event-stationery-1'))
+      .resolves.toMatchObject({ applied: true, paymentId: 'payment-stationery-1', status: PaymentStatus.SUCCEEDED });
+
+    expect(orderUpdate).toHaveBeenCalledWith({
+      where: { id: 'order-1' },
+      data: { status: 'PAID' },
+    });
+  });
 
 });
