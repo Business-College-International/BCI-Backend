@@ -20,10 +20,13 @@ describe('PaymentWebhookProcessor', () => {
       $transaction: jest.fn(async (callback: (tx: any) => unknown) => callback({
         $executeRaw: jest.fn().mockResolvedValue([]),
         payment: {
-          findFirst: jest.fn().mockResolvedValue({
+          findFirst: jest.fn().mockResolvedValue({ id: 'payment-1' }),
+          findUnique: jest.fn().mockResolvedValue({
             id: 'payment-1',
             amount: new Prisma.Decimal('100.00'),
             currency: 'GHS',
+            purpose: 'FEE',
+            studentId: 'student-1',
             status: PaymentStatus.PROCESSING,
             attempts: [{ id: 'attempt-1', provider: 'TEST', providerReference: 'provider-ref-1' }],
             allocations: [{ invoiceId: 'invoice-1' }],
@@ -98,11 +101,15 @@ describe('PaymentWebhookProcessor', () => {
     let recordedError: string | null = null;
     const prisma = {
       $transaction: jest.fn(async (callback: (tx: any) => unknown) => callback({
+        $executeRaw: jest.fn().mockResolvedValue([]),
         payment: {
-          findFirst: jest.fn().mockResolvedValue({
+          findFirst: jest.fn().mockResolvedValue({ id: 'payment-1' }),
+          findUnique: jest.fn().mockResolvedValue({
             id: 'payment-1',
             amount: new Prisma.Decimal('90.00'),
             currency: 'GHS',
+            purpose: 'FEE',
+            studentId: 'student-1',
             status: PaymentStatus.PROCESSING,
             attempts: [],
             allocations: [],
@@ -124,11 +131,15 @@ describe('PaymentWebhookProcessor', () => {
     let errorMessage: string | null = null;
     const prisma = {
       $transaction: jest.fn(async (callback: (tx: any) => unknown) => callback({
+        $executeRaw: jest.fn().mockResolvedValue([]),
         payment: {
-          findFirst: jest.fn().mockResolvedValue({
+          findFirst: jest.fn().mockResolvedValue({ id: 'payment-1' }),
+          findUnique: jest.fn().mockResolvedValue({
             id: 'payment-1',
             amount: new Prisma.Decimal('100.00'),
             currency: 'GHS',
+            purpose: 'FEE',
+            studentId: 'student-1',
             status: PaymentStatus.SUCCEEDED,
             attempts: [],
             allocations: [],
