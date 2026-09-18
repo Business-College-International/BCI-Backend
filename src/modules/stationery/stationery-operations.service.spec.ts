@@ -4,7 +4,8 @@ import { StationeryOperationsService } from './stationery-operations.service';
 
 describe('StationeryOperationsService', () => {
   const tx = {
-    stationeryOrder: { findUnique: jest.fn(), update: jest.fn() },
+    $executeRaw: jest.fn().mockResolvedValue([]),
+    stationeryOrder: { findUnique: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
     payment: { findUnique: jest.fn() },
     stationeryItem: { findUnique: jest.fn(), updateMany: jest.fn() },
     stockMovement: { create: jest.fn() },
