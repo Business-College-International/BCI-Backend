@@ -85,7 +85,7 @@ describe('AssessmentsService', () => {
 
     await expect(service.enterResults('assessment-1', {
       results: [{ studentId: 'student-1', score: 45 }],
-    }, 'office-user', [RoleName.OFFICE])).rejects.toBeInstanceOf(BadRequestException);
+    }, 'teacher-user', [RoleName.TEACHER])).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('rejects a score above the assessment maximum', async () => {
@@ -122,6 +122,8 @@ describe('AssessmentsService', () => {
         term: { status: 'OPEN' },
       });
     tx.$queryRaw.mockResolvedValue([{ id: 'term-1' }]);
+    tx.staff.findUnique.mockResolvedValue({ personId: 'staff-1' });
+    tx.teacherAssignment.findFirst.mockResolvedValue({ id: 'assignment-1' });
 
     const service = new AssessmentsService(makePrisma(tx));
     await expect(service.enterResults('assessment-1', {
