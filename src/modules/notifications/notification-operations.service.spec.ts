@@ -51,6 +51,7 @@ describe('NotificationOperationsService', () => {
     const update = jest.fn().mockResolvedValue({ id: 'd1', status: 'pending', channel: 'SMS', provider: 'moolre' });
     const audit = jest.fn();
     prisma.$transaction.mockImplementation((callback: any) => callback({
+      $queryRaw: jest.fn().mockResolvedValue([]),
       notificationDelivery: { findUnique: jest.fn().mockResolvedValue({ id: 'd1', status: 'failed', channel: 'SMS', provider: 'moolre' }), update },
       auditLog: { create: audit },
     }));
