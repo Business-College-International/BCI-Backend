@@ -177,6 +177,7 @@ export class AssessmentsService {
     const student = await this.prisma.student.findUnique({ where: { id: studentId }, select: { id: true } });
     if (!student) throw new NotFoundException('Student not found.');
 
+    const requestedTermId = termId;
     const guardian = await this.prisma.guardian.findUnique({ where: { userId: actorUserId }, select: { personId: true } });
     let allowed = roles.some((role) => PRIVILEGED_ASSESSMENT_ROLES.has(role));
     let guardianRestricted = false;
@@ -214,8 +215,6 @@ export class AssessmentsService {
 
     if (!allowed) throw new ForbiddenException('You do not have access to this student assessment record.');
     if (guardianRestricted) throw new ForbiddenException('This guardian is not permitted to view academic records for this ward.');
-
-    const requestedTermId = termId;
 
     const results = await this.prisma.assessmentResult.findMany({
       where: {
