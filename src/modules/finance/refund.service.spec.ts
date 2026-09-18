@@ -224,7 +224,7 @@ describe('RefundService', () => {
     prisma.refund.findUnique.mockResolvedValue({
       id: 'refund-1', status: PaymentStatus.PENDING, approvedBy: 'approver-1',
       amount: new Prisma.Decimal('25.00'),
-      payment: { id: 'payment-1', status: PaymentStatus.SUCCEEDED, amount: new Prisma.Decimal('25.00'), purpose: PaymentPurpose.FEE, guardianId: 'guardian-1' },
+      payment: { id: 'payment-1', status: PaymentStatus.SUCCEEDED, amount: new Prisma.Decimal('25.00'), purpose: PaymentPurpose.FEE, guardianId: 'guardian-1', refunds: [] },
     });
     prisma.refund.updateMany.mockResolvedValue({ count: 1 });
     prisma.person.findUnique.mockResolvedValue({ phone: '0240000000' });
@@ -249,7 +249,7 @@ describe('RefundService', () => {
     prisma.refund.findUnique.mockResolvedValue({
       id: 'refund-1', status: PaymentStatus.PENDING, approvedBy: 'approver-1',
       amount: new Prisma.Decimal('25.00'),
-      payment: { id: 'payment-1', status: PaymentStatus.SUCCEEDED, amount: new Prisma.Decimal('25.00'), purpose: PaymentPurpose.FEE, guardianId: 'guardian-1' },
+      payment: { id: 'payment-1', status: PaymentStatus.SUCCEEDED, amount: new Prisma.Decimal('25.00'), purpose: PaymentPurpose.FEE, guardianId: 'guardian-1', refunds: [] },
     });
     prisma.refund.updateMany.mockResolvedValue({ count: 1 });
     prisma.person.findUnique.mockResolvedValue({ phone: '0240000000' });
@@ -275,7 +275,7 @@ describe('RefundService', () => {
     prisma.refund.findUnique.mockResolvedValue({
       id: 'refund-1', status: PaymentStatus.PENDING, approvedBy: 'approver-1',
       amount: new Prisma.Decimal('25.00'),
-      payment: { id: 'payment-1', status: PaymentStatus.SUCCEEDED, amount: new Prisma.Decimal('25.00'), purpose: PaymentPurpose.FEE, guardianId: 'guardian-1' },
+      payment: { id: 'payment-1', status: PaymentStatus.SUCCEEDED, amount: new Prisma.Decimal('25.00'), purpose: PaymentPurpose.FEE, guardianId: 'guardian-1', refunds: [] },
     });
     prisma.refund.updateMany.mockResolvedValue({ count: 1 });
     prisma.person.findUnique.mockResolvedValue({ phone: '0240000000' });
@@ -285,7 +285,7 @@ describe('RefundService', () => {
     prisma.refund.findUnique.mockResolvedValueOnce({
       id: 'refund-1', status: PaymentStatus.PENDING, approvedBy: 'approver-1',
       amount: new Prisma.Decimal('25.00'),
-      payment: { id: 'payment-1', status: PaymentStatus.SUCCEEDED, amount: new Prisma.Decimal('25.00'), purpose: PaymentPurpose.FEE, guardianId: 'guardian-1' },
+      payment: { id: 'payment-1', status: PaymentStatus.SUCCEEDED, amount: new Prisma.Decimal('25.00'), purpose: PaymentPurpose.FEE, guardianId: 'guardian-1', refunds: [] },
     }).mockResolvedValueOnce({ id: 'refund-1', status: PaymentStatus.FAILED });
     const service = new RefundService(prisma, deps.disbursements, deps.journal);
 
@@ -304,7 +304,7 @@ describe('RefundService', () => {
     prisma.$transaction.mockImplementation(async (callback: (client: any) => unknown) => callback(prisma));
     prisma.refund.findUnique.mockResolvedValueOnce({
       id: 'refund-1', status: PaymentStatus.PENDING, approvedBy: 'approver-1', amount: new Prisma.Decimal('40.00'), paymentId: 'payment-1',
-      payment: { id: 'payment-1', status: PaymentStatus.SUCCEEDED, amount: new Prisma.Decimal('100.00'), purpose: PaymentPurpose.FEE, guardianId: 'guardian-1' },
+      payment: { id: 'payment-1', status: PaymentStatus.SUCCEEDED, amount: new Prisma.Decimal('100.00'), purpose: PaymentPurpose.FEE, guardianId: 'guardian-1', refunds: [] },
     }).mockResolvedValueOnce(makeProcessingRefund());
     prisma.refund.updateMany.mockResolvedValue({ count: 1 });
     prisma.person.findUnique.mockResolvedValue({ phone: '0240000000' });
