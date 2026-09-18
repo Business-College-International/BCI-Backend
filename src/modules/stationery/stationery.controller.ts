@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { RoleName } from '@prisma/client';
 import { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -9,6 +9,7 @@ import { StationeryService } from './stationery.service';
 import { CreateStationeryItemDto } from './dto/create-stationery-item.dto';
 import { AdjustStockDto } from './dto/adjust-stock.dto';
 import { CreateStationeryOrderDto } from './dto/create-stationery-order.dto';
+import { StationeryPaymentDto } from './dto/stationery-payment.dto';
 
 type AuthenticatedRequest = Request & { user: { id: string; roles: RoleName[] } };
 
@@ -40,6 +41,16 @@ export class StationeryController {
     return this.stationery.createDraftOrder(dto, request.user.id, request.user.roles);
   }
 
+  @Post('orders/:orderId/pay')
+  @RequirePermissions(PERMISSIONS.PAYMENTS_MANAGE)
+  initiateOrderPayment(
+    @Param('orderId') orderId: string,
+    @Body() dto: StationeryPaymentDto,
+    @Headers('idempotency-key') idempotencyKey: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.stationery.initiatePayment(orderId, dto, request.user.id, request.user.roles, idempotencyKey);
+  }
   @Get('orders/me')
   listMyOrders(@Req() request: AuthenticatedRequest) {
     return this.stationery.listMyOrders(request.user.id, request.user.roles);
