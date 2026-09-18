@@ -123,6 +123,28 @@ describe('AssessmentsService', () => {
     }, 'teacher-user', [RoleName.TEACHER])).rejects.toBeInstanceOf(BadRequestException);
     expect(tx.assessmentResult.upsert).not.toHaveBeenCalled();
   });
+  it('denies a teacher requesting assessments for a term where they are not assigned', async () => {
+    const tx = makeTx();
+    const prisma = makePrisma(tx);
+    prisma.student.findUnique.mockResolvedValue({ id: 'student-1' });
+    prisma.guardian.findUnique.mockResolvedValue(null);
+    tx.staff.findUnique.mockResolvedValue({ personId: 'staff-1' });
+    tx.enrolment.findMany.mockResolvedValue([]);
+    // Historical term is deliberately not represented by an active enrolment.
+    tx.teacherAssignment.findFirst.mockResolvedValue(null);
+
+    const service = new AssessmentsService(prisma);
+
+    await expect(
+      service.getStudentAssessments('student-1', 'teacher-user', [RoleName.TEACHER], 'historical-term-1'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(tx.enrolment.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { studentId: 'student-1', status: 'ACTIVE', termId: 'historical-term-1' },
+    }));
+    expect(prisma.assessmentResult.findMany).not.toHaveBeenCalled();
+  });
+
 });
 
 describe('AssessmentsService assessment roster', () => {
