@@ -1,0 +1,67 @@
+name: Establish Wallet Ledger Migration
+
+on:
+  push:
+    branches:
+      - feat/wallet-ledger-foundation
+
+permissions:
+  contents: write
+
+jobs:
+  establish:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: bci
+          POSTGRES_PASSWORD: bci
+          POSTGRES_DB: bci_migration
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U bci -d bci_migration"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://bci:bci@localhost:5432/bci_migration?schema=public
+      DIRECT_URL: postgresql://bci:bci@localhost:5432/bci_migration?schema=public
+      NODE_ENV: test
+      JWT_ACCESS_SECRET: wallet-ledger-ci-only-secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install
+      - run: npx prisma validate
+      - run: npx prisma generate
+
+      - name: Generate wallet ledger migration
+        run: |
+          mkdir -p prisma/migrations/20260918070000_wallet_ledger_foundation
+          npx prisma migrate diff --from-migrations prisma/migrations --to-schema-datamodel prisma/schema.prisma --script > prisma/migrations/20260918070000_wallet_ledger_foundation/migration.sql
+
+      - name: Deploy full migration history to clean PostgreSQL
+        run: npx prisma migrate deploy
+
+      - name: Reconcile database against wallet ledger schema
+        run: npx prisma migrate diff --from-schema-datamodel prisma/schema.prisma --to-url "$DATABASE_URL" --exit-code
+
+      - name: Build and test
+        run: |
+          npm run build
+          npm test -- --passWithNoTests
+
+      - name: Commit migration and remove temporary workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/establish-wallet-ledger-migration.yml
+          git add -A prisma/migrations
+          git status --short
+          git diff --cached --stat
+          git commit -m "chore(db): establish wallet ledger migration"
+          git push origin HEAD:feat/wallet-ledger-foundation
