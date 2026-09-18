@@ -1,4 +1,4 @@
-import { ConflictException, ForbiddenException, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, ServiceUnavailableException } from '@nestjs/common';
 import { PaymentPurpose, PaymentStatus, Prisma, RoleName } from '@prisma/client';
 import { WalletTopUpService } from './wallet-top-up.service';
 
@@ -143,4 +143,101 @@ describe('WalletTopUpService', () => {
       }),
     }));
   });
+  it('records an explicit provider rejection as a failed payment instead of treating it as ambiguous', async () => {
+    const { prisma } = makePrisma();
+    const adapter = makeAdapter();
+    prisma.idempotencyKey.findUnique.mockResolvedValue(null);
+    prisma.guardian.findUnique.mockResolvedValue({ personId: 'guardian-1' });
+    prisma.student.findUnique.mockResolvedValue({ id: 'student-1' });
+    prisma.guardianStudent.findUnique.mockResolvedValue({ canManageWallet: true });
+    prisma.person.findUnique.mockResolvedValue({ id: 'guardian-1', firstName: 'Ama', lastName: 'Parent', phone: '0244000000' });
+    prisma.payment.create.mockResolvedValue({
+      id: 'payment-1',
+      studentId: 'student-1',
+      guardianId: 'guardian-1',
+      amount: new Prisma.Decimal('50.00'),
+      currency: 'GHS',
+      status: PaymentStatus.PENDING,
+      purpose: PaymentPurpose.WALLET_TOP_UP,
+      clientReference: 'bci-wallet-ref-1',
+    });
+    prisma.paymentProviderAttempt.create.mockResolvedValue({ id: 'attempt-1' });
+    adapter.initiatePayment.mockRejectedValue(new BadRequestException('Mobile money request rejected.'));
+
+    const service = new WalletTopUpService(prisma as any, adapter);
+    await expect(service.initiate(
+      'student-1',
+      { amount: '50.00' },
+      'guardian-user',
+      [RoleName.GUARDIAN],
+      'wallet-topup-rejected',
+    )).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(prisma.payment.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'payment-1', status: PaymentStatus.PENDING },
+      data: expect.objectContaining({
+        status: PaymentStatus.FAILED,
+        failureCode: 'PROVIDER_INITIATION_REJECTED',
+      }),
+    }));
+    expect(prisma.paymentProviderAttempt.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'attempt-1', status: PaymentStatus.PENDING },
+      data: expect.objectContaining({
+        status: PaymentStatus.FAILED,
+        failureCode: 'PROVIDER_INITIATION_REJECTED',
+      }),
+    }));
+    expect(prisma.idempotencyKey.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ statusCode: 400, responseJson: expect.objectContaining({ status: PaymentStatus.FAILED }) }),
+    }));
+  });
+
+  it('retries accepted-provider persistence once before marking local state ambiguous', async () => {
+    const { prisma } = makePrisma();
+    const adapter = makeAdapter();
+    prisma.idempotencyKey.findUnique.mockResolvedValue(null);
+    prisma.guardian.findUnique.mockResolvedValue({ personId: 'guardian-1' });
+    prisma.student.findUnique.mockResolvedValue({ id: 'student-1' });
+    prisma.guardianStudent.findUnique.mockResolvedValue({ canManageWallet: true });
+    prisma.person.findUnique.mockResolvedValue({ id: 'guardian-1', firstName: 'Ama', lastName: 'Parent', phone: '0244000000' });
+    prisma.payment.create.mockResolvedValue({
+      id: 'payment-1',
+      studentId: 'student-1',
+      guardianId: 'guardian-1',
+      amount: new Prisma.Decimal('50.00'),
+      currency: 'GHS',
+      status: PaymentStatus.PENDING,
+      purpose: PaymentPurpose.WALLET_TOP_UP,
+      clientReference: 'bci-wallet-ref-1',
+    });
+    prisma.paymentProviderAttempt.create.mockResolvedValue({ id: 'attempt-1' });
+    adapter.initiatePayment.mockResolvedValue({
+      providerReference: 'moolre-ref-2',
+      requiresOtp: false,
+      mock: false,
+      sessionId: null,
+    });
+    prisma.$transaction
+      .mockImplementationOnce(async (callback: (client: any) => unknown) => callback(prisma))
+      .mockRejectedValueOnce(new Error('database unavailable'))
+      .mockImplementationOnce(async (callback: (client: any) => unknown) => callback(prisma));
+
+    const service = new WalletTopUpService(prisma as any, adapter);
+    const result = await service.initiate(
+      'student-1',
+      { amount: '50.00' },
+      'guardian-user',
+      [RoleName.GUARDIAN],
+      'wallet-topup-persist-retry',
+    );
+
+    expect(result).toMatchObject({
+      paymentId: 'payment-1',
+      providerReference: 'moolre-ref-2',
+      status: PaymentStatus.PROCESSING,
+    });
+    expect(prisma.$transaction).toHaveBeenCalledTimes(3);
+    expect(prisma.idempotencyKey.update).toHaveBeenCalled();
+  });
+
 });

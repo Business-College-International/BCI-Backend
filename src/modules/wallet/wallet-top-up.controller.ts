@@ -16,7 +16,7 @@ export class WalletTopUpController {
   constructor(private readonly topUp: WalletTopUpService) {}
 
   @Post('students/:studentId/top-up')
-  @RequirePermissions(PERMISSIONS.WALLET_READ)
+  @RequirePermissions(PERMISSIONS.WALLET_TOP_UP)
   initiate(
     @Param('studentId', new ParseUUIDPipe()) studentId: string,
     @Body() dto: WalletTopUpDto,

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -196,30 +197,83 @@ export class WalletTopUpService {
         callbackUrl: dto.callbackUrl ?? '',
         customer: reservation.customer,
       });
-    } catch {
-      await this.prisma.$transaction(async (tx) => {
-        await tx.payment.updateMany({
-          where: { id: reservation.payment.id, status: PaymentStatus.PENDING },
-          data: {
-            status: PaymentStatus.PROCESSING,
-            provider: this.moolre.provider,
-            providerReference: null,
-            failureCode: 'PROVIDER_INITIATION_UNKNOWN',
-            failureMessage: 'Provider initiation outcome is unknown; awaiting webhook reconciliation.',
-            completedAt: null,
-          },
+    } catch (error) {
+      if (error instanceof BadRequestException) {
+        const failureMessage = error.message;
+        await this.prisma.$transaction(async (tx) => {
+          await tx.payment.updateMany({
+            where: { id: reservation.payment.id, status: PaymentStatus.PENDING },
+            data: {
+              status: PaymentStatus.FAILED,
+              provider: this.moolre.provider,
+              providerReference: null,
+              failureCode: 'PROVIDER_INITIATION_REJECTED',
+              failureMessage,
+              completedAt: new Date(),
+            },
+          });
+          await tx.paymentProviderAttempt.updateMany({
+            where: { id: reservation.attemptId, status: PaymentStatus.PENDING },
+            data: {
+              status: PaymentStatus.FAILED,
+              providerReference: null,
+              failureCode: 'PROVIDER_INITIATION_REJECTED',
+              failureMessage,
+              resolvedAt: new Date(),
+            },
+          });
+          await tx.idempotencyKey.update({
+            where: {
+              userId_key_operation: {
+                userId: actorUserId,
+                key: normalizedKey,
+                operation: 'wallet.topup',
+              },
+            },
+            data: {
+              responseJson: {
+                paymentId: reservation.payment.id,
+                purpose: PaymentPurpose.WALLET_TOP_UP,
+                status: PaymentStatus.FAILED,
+                retryable: true,
+                failureCode: 'PROVIDER_INITIATION_REJECTED',
+                failureMessage,
+              },
+              statusCode: 400,
+              completedAt: new Date(),
+            },
+          });
         });
-        await tx.paymentProviderAttempt.updateMany({
-          where: { id: reservation.attemptId, status: PaymentStatus.PENDING },
-          data: {
-            status: PaymentStatus.PROCESSING,
-            providerReference: null,
-            failureCode: 'PROVIDER_INITIATION_UNKNOWN',
-            failureMessage: 'Provider initiation outcome is unknown; awaiting webhook reconciliation.',
-            resolvedAt: null,
-          },
+        throw error;
+      }
+
+      try {
+        await this.prisma.$transaction(async (tx) => {
+          await tx.payment.updateMany({
+            where: { id: reservation.payment.id, status: PaymentStatus.PENDING },
+            data: {
+              status: PaymentStatus.PROCESSING,
+              provider: this.moolre.provider,
+              providerReference: null,
+              failureCode: 'PROVIDER_INITIATION_UNKNOWN',
+              failureMessage: 'Provider initiation outcome is unknown; awaiting webhook reconciliation.',
+              completedAt: null,
+            },
+          });
+          await tx.paymentProviderAttempt.updateMany({
+            where: { id: reservation.attemptId, status: PaymentStatus.PENDING },
+            data: {
+              status: PaymentStatus.PROCESSING,
+              providerReference: null,
+              failureCode: 'PROVIDER_INITIATION_UNKNOWN',
+              failureMessage: 'Provider initiation outcome is unknown; awaiting webhook reconciliation.',
+              resolvedAt: null,
+            },
+          });
         });
-      });
+      } catch {
+        // Provider outcome remains ambiguous; webhook reconciliation remains authoritative.
+      }
 
       throw new ServiceUnavailableException(
         'Wallet top-up provider initiation outcome is unknown; the payment remains processing and requires reconciliation.',
@@ -241,45 +295,79 @@ export class WalletTopUpService {
       purpose: PaymentPurpose.WALLET_TOP_UP,
     };
 
-    try {
-      await this.prisma.$transaction(async (tx) => {
-        await tx.payment.update({
-          where: { id: reservation.payment.id },
-          data: {
-            status: PaymentStatus.PROCESSING,
-            provider: this.moolre.provider,
-            providerReference: providerResult.providerReference,
-          },
-        });
-        await tx.paymentProviderAttempt.update({
-          where: { id: reservation.attemptId },
-          data: {
-            status: PaymentStatus.PROCESSING,
-            providerReference: providerResult.providerReference,
-            responsePayload: response,
-            resolvedAt: providerResult.requiresOtp ? null : new Date(),
-          },
-        });
-        await tx.idempotencyKey.update({
-          where: {
-            userId_key_operation: {
-              userId: actorUserId,
-              key: normalizedKey,
-              operation: 'wallet.topup',
-            },
-          },
-          data: {
-            responseJson: response,
-            statusCode: 202,
-            completedAt: new Date(),
-          },
-        });
+    const persistAcceptedResult = async () => this.prisma.$transaction(async (tx) => {
+      await tx.payment.update({
+        where: { id: reservation.payment.id },
+        data: {
+          status: PaymentStatus.PROCESSING,
+          provider: this.moolre.provider,
+          providerReference: providerResult.providerReference,
+        },
       });
+      await tx.paymentProviderAttempt.update({
+        where: { id: reservation.attemptId },
+        data: {
+          status: PaymentStatus.PROCESSING,
+          providerReference: providerResult.providerReference,
+          responsePayload: response,
+          resolvedAt: providerResult.requiresOtp ? null : new Date(),
+        },
+      });
+      await tx.idempotencyKey.update({
+        where: {
+          userId_key_operation: {
+            userId: actorUserId,
+            key: normalizedKey,
+            operation: 'wallet.topup',
+          },
+        },
+        data: {
+          responseJson: response,
+          statusCode: 202,
+          completedAt: new Date(),
+        },
+      });
+    });
+
+    try {
+      await persistAcceptedResult();
       return response;
     } catch {
-      throw new ServiceUnavailableException(
-        'Wallet top-up provider accepted the request, but local state could not be persisted. Reconcile before retrying.',
-      );
+      try {
+        await persistAcceptedResult();
+        return response;
+      } catch {
+        try {
+          await this.prisma.$transaction(async (tx) => {
+            await tx.payment.updateMany({
+              where: { id: reservation.payment.id, status: { in: [PaymentStatus.PENDING, PaymentStatus.PROCESSING] } },
+              data: {
+                status: PaymentStatus.PROCESSING,
+                provider: this.moolre.provider,
+                providerReference: providerResult.providerReference,
+                failureCode: 'LOCAL_PERSISTENCE_UNKNOWN',
+                failureMessage: 'Provider accepted the wallet top-up, but local settlement state is unknown; reconcile before retrying.',
+              },
+            });
+            await tx.paymentProviderAttempt.updateMany({
+              where: { id: reservation.attemptId, status: { in: [PaymentStatus.PENDING, PaymentStatus.PROCESSING] } },
+              data: {
+                status: PaymentStatus.PROCESSING,
+                providerReference: providerResult.providerReference,
+                failureCode: 'LOCAL_PERSISTENCE_UNKNOWN',
+                failureMessage: 'Provider accepted the wallet top-up, but local settlement state is unknown; reconcile before retrying.',
+                resolvedAt: null,
+                responsePayload: { ...response, persistenceOutcomeUnknown: true },
+              },
+            });
+          });
+        } catch {
+          // Best-effort safety marker; webhook reconciliation remains authoritative.
+        }
+        throw new ServiceUnavailableException(
+          'Wallet top-up provider accepted the request, but local state could not be persisted. Reconcile before retrying.',
+        );
+      }
     }
   }
 }

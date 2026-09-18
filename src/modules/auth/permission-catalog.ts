@@ -22,6 +22,7 @@ export const PERMISSIONS = {
   STAFF_READ: 'staff.read',
   STAFF_MANAGE: 'staff.manage',
   WALLET_READ: 'wallet.read',
+  WALLET_TOP_UP: 'wallet.top_up',
   WALLET_MANAGE: 'wallet.manage',
   USERS_MANAGE: 'users.manage',
 } as const;
