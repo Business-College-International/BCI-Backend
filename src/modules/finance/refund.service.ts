@@ -23,6 +23,7 @@ export class RefundService {
 
     try {
       return await this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM "Payment" WHERE id = ${dto.paymentId} FOR UPDATE`;
         const payment = await tx.payment.findUnique({
           where: { id: dto.paymentId },
           include: {

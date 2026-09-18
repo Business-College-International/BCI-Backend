@@ -11,6 +11,7 @@ function mockPrisma() {
     guardianStudent: { findFirst: jest.fn() },
     studentInvoice: { findUnique: jest.fn(), update: jest.fn() },
     financialJournalEntry: { findMany: jest.fn(), create: jest.fn() },
+    $queryRaw: jest.fn().mockResolvedValue([]),
     $transaction: jest.fn(),
   } as any;
 }
@@ -73,6 +74,32 @@ describe('RefundService', () => {
     const service = new RefundService(prisma, deps.disbursements, deps.journal);
     await expect(service.requestRefund({ paymentId: 'payment-1', amount: '41.00', reason: 'Duplicate payment' }, 'user-1', [RoleName.ACCOUNTANT]))
       .rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('locks the payment row before calculating refundable capacity', async () => {
+    const prisma = mockPrisma();
+    const deps = mockDeps();
+    const tx = prisma;
+    prisma.$transaction.mockImplementation(async (callback: (client: typeof tx) => unknown) => callback(tx));
+    prisma.payment.findUnique.mockResolvedValue({
+      id: 'payment-1',
+      status: PaymentStatus.SUCCEEDED,
+      amount: new Prisma.Decimal('100.00'),
+      purpose: PaymentPurpose.FEE,
+      allocations: [{ id: 'allocation-1', invoiceId: 'invoice-1', amount: new Prisma.Decimal('100.00') }],
+      refunds: [],
+    });
+    prisma.refund.create.mockResolvedValue({ id: 'refund-1', status: PaymentStatus.PENDING, amount: new Prisma.Decimal('40.00') });
+    prisma.auditLog.create.mockResolvedValue({});
+
+    const service = new RefundService(prisma, deps.disbursements, deps.journal);
+    await service.requestRefund(
+      { paymentId: 'payment-1', amount: '40.00', reason: 'Duplicate payment' },
+      'user-1',
+      [RoleName.ACCOUNTANT],
+    );
+
+    expect(prisma.$queryRaw).toHaveBeenCalledWith(expect.anything());
   });
 
   it('runs refund reservation under serializable isolation', async () => {
