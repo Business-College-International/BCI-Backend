@@ -126,13 +126,7 @@ export class RefundService {
     this.assertManage(roles);
 
     const reservation = await this.prisma.$transaction(async (tx) => {
-      const refundLookup = await tx.refund.findUnique({
-        where: { id: refundId },
-        select: { paymentId: true },
-      });
-      if (!refundLookup) throw new NotFoundException('Refund not found.');
-
-      await tx.$queryRaw`SELECT id FROM "Payment" WHERE id = ${refundLookup.paymentId} FOR UPDATE`;
+      await tx.$queryRaw`SELECT r.id FROM "Refund" r INNER JOIN "Payment" p ON p.id = r."paymentId" WHERE r.id = ${refundId} FOR UPDATE OF r, p`;
 
       const current = await tx.refund.findUnique({
         where: { id: refundId },
