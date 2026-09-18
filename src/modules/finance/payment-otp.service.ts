@@ -55,6 +55,7 @@ export class PaymentOtpService {
         return { existing: existingKey.responseJson as Record<string, unknown> };
       }
 
+      await tx.$queryRaw`SELECT id FROM "Payment" WHERE id = ${paymentId} FOR UPDATE`;
       const payment = await tx.payment.findUnique({
         where: { id: paymentId },
         select: {
