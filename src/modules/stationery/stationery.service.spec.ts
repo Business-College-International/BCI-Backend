@@ -68,7 +68,7 @@ describe('StationeryService', () => {
       id: 'payment-1', studentId: 'student-1', guardianId: 'guardian-1',
       amount: new Prisma.Decimal('20.00'), currency: 'GHS', status: 'PENDING',
       purpose: 'STATIONERY', clientReference: 'bci-stationery-order-1-ref',
-    }), findUnique: jest.fn() };
+    }), findUnique: jest.fn(), update: jest.fn().mockResolvedValue({}) };
     tx.paymentProviderAttempt = { create: jest.fn().mockResolvedValue({ id: 'attempt-1' }), update: jest.fn() };
     tx.stationeryOrder.update.mockResolvedValue({});
     tx.idempotencyKey.findUnique.mockResolvedValue(null);
