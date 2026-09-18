@@ -36,6 +36,7 @@ const permissionsByRole: Record<RoleName, readonly string[]> = {
     PERMISSIONS.PAYMENTS_MANAGE,
     PERMISSIONS.PAYROLL_READ,
     PERMISSIONS.WALLET_READ,
+    PERMISSIONS.WALLET_MANAGE,
   ],
   [RoleName.ACCOUNTANT]: [
     PERMISSIONS.STUDENTS_READ,
@@ -47,6 +48,7 @@ const permissionsByRole: Record<RoleName, readonly string[]> = {
     PERMISSIONS.INVENTORY_READ,
     PERMISSIONS.STAFF_READ,
     PERMISSIONS.WALLET_READ,
+    PERMISSIONS.WALLET_MANAGE,
   ],
   [RoleName.TEACHER]: [
     PERMISSIONS.STUDENTS_READ,
