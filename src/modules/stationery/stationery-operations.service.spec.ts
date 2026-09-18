@@ -73,5 +73,62 @@ describe('StationeryOperationsService', () => {
     tx.stationeryItem.updateMany.mockResolvedValue({ count: 0 });
 
     await expect(service.markReadyForCollection('order-1', 'actor-1', ['OFFICE' as any])).rejects.toThrow(ConflictException);
+  });  it('attaches only a matching succeeded stationery payment to a draft order', async () => {
+    tx.stationeryOrder.findUnique.mockResolvedValue({
+      id: 'order-1',
+      orderNumber: 'ST-1',
+      studentId: 'student-1',
+      guardianId: 'guardian-1',
+      status: 'DRAFT',
+      totalAmount: new Prisma.Decimal('25.00'),
+      paymentId: null,
+    });
+    tx.payment.findUnique.mockResolvedValue({
+      id: 'pay-1',
+      studentId: 'student-1',
+      guardianId: 'guardian-1',
+      amount: new Prisma.Decimal('25.00'),
+      currency: 'GHS',
+      purpose: 'STATIONERY',
+      status: 'SUCCEEDED',
+      completedAt: new Date(),
+      provider: 'MOOLRE',
+      providerReference: 'ref-1',
+    });
+    tx.stationeryOrder.findFirst.mockResolvedValue(null);
+    tx.stationeryOrder.update.mockResolvedValue({ id: 'order-1', status: 'PAID', paymentId: 'pay-1' });
+
+    const result = await service.attachSuccessfulPayment('order-1', 'pay-1', 'actor-1', ['OFFICE' as any]);
+    expect(result).toMatchObject({ status: 'PAID', paymentId: 'pay-1' });
+    expect(tx.$executeRaw).toHaveBeenCalled();
+    expect(tx.stationeryOrder.update).toHaveBeenCalledWith({
+      where: { id: 'order-1' },
+      data: { paymentId: 'pay-1', status: 'PAID' },
+    });
   });
+
+  it('rejects attaching a fee payment to a stationery order', async () => {
+    tx.stationeryOrder.findUnique.mockResolvedValue({
+      id: 'order-1',
+      orderNumber: 'ST-1',
+      studentId: 'student-1',
+      guardianId: 'guardian-1',
+      status: 'DRAFT',
+      totalAmount: new Prisma.Decimal('25.00'),
+      paymentId: null,
+    });
+    tx.payment.findUnique.mockResolvedValue({
+      id: 'pay-1',
+      studentId: 'student-1',
+      guardianId: 'guardian-1',
+      amount: new Prisma.Decimal('25.00'),
+      currency: 'GHS',
+      purpose: 'FEE',
+      status: 'SUCCEEDED',
+    });
+    await expect(service.attachSuccessfulPayment('order-1', 'pay-1', 'actor-1', ['OFFICE' as any]))
+      .rejects.toThrow(ConflictException);
+  });
+
+
 });
