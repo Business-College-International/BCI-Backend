@@ -1,14 +1,20 @@
 name: PostgreSQL Schema Contract
 
 on:
-  pull_request:
+  push:
+    branches-ignore:
+      - main
     paths:
       - 'prisma/schema.prisma'
       - 'prisma/seed.ts'
+      - 'prisma/**'
+      - 'prisma/migrations/**'
       - 'package.json'
       - 'package-lock.json'
-      - 'prisma/**'
-      - '.github/workflows/postgres-schema-contract.yml'
+  pull_request:
+    types:
+      - opened
+      - reopened
   workflow_dispatch:
 
 concurrency:
