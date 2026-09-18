@@ -1,4 +1,4 @@
-import { ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, ServiceUnavailableException } from '@nestjs/common';
 import { Prisma, RoleName } from '@prisma/client';
 import { StationeryService } from './stationery.service';
 
@@ -81,6 +81,78 @@ describe('StationeryService', () => {
     const result = await service.initiatePayment('order-1', { network: 'Telecel' }, 'guardian-user', [RoleName.GUARDIAN], 'key-1');
     expect(result).toMatchObject({ paymentId: 'payment-1', orderId: 'order-1', status: 'PROCESSING' });
     expect(moolre.initiatePayment).toHaveBeenCalledWith(expect.objectContaining({ purpose: 'STATIONERY', amount: '20.00' }));
+  });
+
+  it('records an explicit provider rejection and releases the order payment reservation', async () => {
+    const tx = makeTx();
+    tx.guardian.findUnique.mockResolvedValue({ personId: 'guardian-1' });
+    tx.stationeryOrder.findUnique.mockResolvedValue({
+      id: 'order-1', orderNumber: 'ST-1', studentId: 'student-1', guardianId: 'guardian-1',
+      status: 'DRAFT', totalAmount: new Prisma.Decimal('20.00'), paymentId: null,
+    });
+    tx.person.findUnique.mockResolvedValue({ firstName: 'Ama', lastName: 'Parent', phone: '0244000000' });
+    tx.payment.create.mockResolvedValue({
+      id: 'payment-1', studentId: 'student-1', guardianId: 'guardian-1',
+      amount: new Prisma.Decimal('20.00'), currency: 'GHS',
+      status: 'PENDING', purpose: 'STATIONERY', clientReference: 'ref-1',
+    });
+    tx.paymentProviderAttempt.create.mockResolvedValue({ id: 'attempt-1' });
+    tx.idempotencyKey.findUnique.mockResolvedValue(null);
+    tx.idempotencyKey.create.mockResolvedValue({});
+    tx.idempotencyKey.update.mockResolvedValue({});
+    tx.auditLog.create.mockResolvedValue({});
+    const prisma = {
+      $transaction: jest.fn(async (callback: (value: typeof tx) => unknown) => callback(tx)),
+      idempotencyKey: { findUnique: jest.fn() },
+    };
+    const moolre = { provider: 'MOOLRE', initiatePayment: jest.fn().mockRejectedValue(new BadRequestException('Rejected by provider.')) };
+    const service = new StationeryService(prisma as never, moolre as never);
+
+    await expect(service.initiatePayment('order-1', {}, 'guardian-user', [RoleName.GUARDIAN], 'stationery-key-reject'))
+      .rejects.toBeInstanceOf(BadRequestException);
+
+    expect(tx.payment.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'payment-1' },
+      data: expect.objectContaining({ status: 'FAILED', failureCode: 'PROVIDER_INITIATION_REJECTED' }),
+    }));
+    expect(tx.stationeryOrder.updateMany).toHaveBeenCalledWith({
+      where: { id: 'order-1', paymentId: 'payment-1', status: 'DRAFT' },
+      data: { paymentId: null },
+    });
+  });
+
+  it('keeps a provider timeout explicitly processing for reconciliation', async () => {
+    const tx = makeTx();
+    tx.guardian.findUnique.mockResolvedValue({ personId: 'guardian-1' });
+    tx.stationeryOrder.findUnique.mockResolvedValue({
+      id: 'order-1', orderNumber: 'ST-1', studentId: 'student-1', guardianId: 'guardian-1',
+      status: 'DRAFT', totalAmount: new Prisma.Decimal('20.00'), paymentId: null,
+    });
+    tx.person.findUnique.mockResolvedValue({ firstName: 'Ama', lastName: 'Parent', phone: '0244000000' });
+    tx.payment.create.mockResolvedValue({
+      id: 'payment-2', studentId: 'student-1', guardianId: 'guardian-1',
+      amount: new Prisma.Decimal('20.00'), currency: 'GHS',
+      status: 'PENDING', purpose: 'STATIONERY', clientReference: 'ref-2',
+    });
+    tx.paymentProviderAttempt.create.mockResolvedValue({ id: 'attempt-2' });
+    tx.idempotencyKey.findUnique.mockResolvedValue(null);
+    tx.idempotencyKey.create.mockResolvedValue({});
+    tx.idempotencyKey.update.mockResolvedValue({});
+    tx.auditLog.create.mockResolvedValue({});
+    const prisma = {
+      $transaction: jest.fn(async (callback: (value: typeof tx) => unknown) => callback(tx)),
+      idempotencyKey: { findUnique: jest.fn() },
+    };
+    const moolre = { provider: 'MOOLRE', initiatePayment: jest.fn().mockRejectedValue(new Error('timeout')) };
+    const service = new StationeryService(prisma as never, moolre as never);
+
+    await expect(service.initiatePayment('order-1', {}, 'guardian-user', [RoleName.GUARDIAN], 'stationery-key-timeout'))
+      .rejects.toBeInstanceOf(ServiceUnavailableException);
+
+    expect(tx.payment.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'payment-2' },
+      data: expect.objectContaining({ status: 'PROCESSING', failureCode: 'PROVIDER_INITIATION_UNKNOWN' }),
+    }));
   });
 
 
