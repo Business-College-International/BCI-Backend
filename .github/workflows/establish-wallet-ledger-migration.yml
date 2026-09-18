@@ -1,9 +1,8 @@
 name: Establish Wallet Ledger Migration
 
 on:
-  push:
-    branches:
-      - feat/wallet-ledger-foundation
+  pull_request:
+    types: [opened, synchronize]
 
 permissions:
   contents: write
@@ -32,6 +31,8 @@ jobs:
       JWT_ACCESS_SECRET: wallet-ledger-ci-only-secret
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
       - uses: actions/setup-node@v4
         with:
           node-version: 20
