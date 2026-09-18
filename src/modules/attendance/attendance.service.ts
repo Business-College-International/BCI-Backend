@@ -21,6 +21,10 @@ export class AttendanceService {
 
   async createSession(dto: CreateAttendanceSessionDto, actorUserId: string, roles: RoleName[]) {
     return this.prisma.$transaction(async (tx) => {
+      // Lock the class row so concurrent session creation for the same class
+      // cannot both pass the duplicate-session check before either commits.
+      await tx.$queryRaw`SELECT id FROM "SchoolClass" WHERE id = ${dto.classId} FOR UPDATE`;
+
       const [term, schoolClass] = await Promise.all([
         tx.term.findUnique({ where: { id: dto.termId } }),
         tx.schoolClass.findUnique({ where: { id: dto.classId } }),
@@ -64,6 +68,21 @@ export class AttendanceService {
         }
       }
 
+      const normalizedPeriodLabel = dto.periodLabel?.trim() || null;
+      const existingSession = await tx.attendanceSession.findFirst({
+        where: {
+          termId: dto.termId,
+          classId: dto.classId,
+          subjectId: dto.subjectId ?? null,
+          sessionDate,
+          periodLabel: normalizedPeriodLabel,
+        },
+        select: { id: true },
+      });
+      if (existingSession) {
+        throw new ConflictException('An attendance session already exists for this class, subject, date, and period.');
+      }
+
       if (dto.subjectId) {
         const subject = await tx.subject.findUnique({ where: { id: dto.subjectId } });
         if (!subject) throw new NotFoundException('Subject not found.');
@@ -79,7 +98,7 @@ export class AttendanceService {
           subjectId: dto.subjectId,
           teacherId: staff?.personId,
           sessionDate,
-          periodLabel: dto.periodLabel?.trim(),
+          periodLabel: normalizedPeriodLabel,
           startsAt: dto.startsAt ? new Date(dto.startsAt) : undefined,
           endsAt: dto.endsAt ? new Date(dto.endsAt) : undefined,
         },
