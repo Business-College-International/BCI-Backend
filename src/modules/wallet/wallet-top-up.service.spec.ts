@@ -30,7 +30,7 @@ function makeAdapter() {
 describe('WalletTopUpService', () => {
   it('requires an idempotency key', async () => {
     const { prisma } = makePrisma();
-    const service = new WalletTopUpService(prisma, makeAdapter());
+    const service = new WalletTopUpService(prisma as any, makeAdapter());
     await expect(service.initiate('student-1', { amount: '50.00' }, 'guardian-user', [RoleName.GUARDIAN], ''))
       .rejects.toBeInstanceOf(ConflictException);
   });
@@ -42,7 +42,7 @@ describe('WalletTopUpService', () => {
     prisma.student.findUnique.mockResolvedValue({ id: 'student-1' });
     prisma.guardianStudent.findUnique.mockResolvedValue({ canManageWallet: false });
 
-    const service = new WalletTopUpService(prisma, makeAdapter());
+    const service = new WalletTopUpService(prisma as any, makeAdapter());
     await expect(service.initiate(
       'student-1',
       { amount: '50.00' },
@@ -78,7 +78,7 @@ describe('WalletTopUpService', () => {
       sessionId: null,
     });
 
-    const service = new WalletTopUpService(prisma, adapter);
+    const service = new WalletTopUpService(prisma as any, adapter);
     const result = await service.initiate(
       'student-1',
       { amount: '50.00', network: 'Telecel' },
@@ -126,7 +126,7 @@ describe('WalletTopUpService', () => {
     prisma.paymentProviderAttempt.create.mockResolvedValue({ id: 'attempt-1' });
     adapter.initiatePayment.mockRejectedValue(new Error('provider timeout'));
 
-    const service = new WalletTopUpService(prisma, adapter);
+    const service = new WalletTopUpService(prisma as any, adapter);
     await expect(service.initiate(
       'student-1',
       { amount: '50.00' },
