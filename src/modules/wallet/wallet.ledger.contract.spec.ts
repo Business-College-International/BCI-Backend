@@ -1,5 +1,6 @@
 import { Prisma, WalletTransactionDirection, WalletTransactionType } from '@prisma/client';
 
+// Contract-only regression coverage for signed wallet effects.
 describe('wallet ledger contract', () => {
   it('keeps credits and debits explicit even when their transaction types differ', () => {
     const entries = [
