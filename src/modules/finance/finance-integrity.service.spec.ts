@@ -12,6 +12,7 @@ function mockPrisma() {
     payment: { findMany: jest.fn() },
     paymentAllocation: { findMany: jest.fn() },
     walletTransaction: { findMany: jest.fn().mockResolvedValue([]) },
+    stationeryOrder: { findMany: jest.fn().mockResolvedValue([]) },
   } as any;
 }
 
@@ -152,5 +153,66 @@ describe('FinanceIntegrityService', () => {
     ]);
     expect(report.healthy).toBe(false);
   });
+  it('detects a successful stationery payment without a linked order', async () => {
+    const prisma = {
+      studentInvoice: { findMany: jest.fn().mockResolvedValue([]) },
+      payment: {
+        findMany: jest.fn().mockResolvedValue([{
+          id: 'stationery-payment-1',
+          studentId: 'student-1',
+          purpose: 'STATIONERY',
+          status: PaymentStatus.SUCCEEDED,
+          amount: decimal('25.00'),
+          completedAt: new Date(),
+          receipt: { id: 'receipt-1', receiptNumber: 'R-1' },
+          refunds: [],
+        }]),
+      },
+      paymentAllocation: { findMany: jest.fn().mockResolvedValue([]) },
+      walletTransaction: { findMany: jest.fn().mockResolvedValue([]) },
+      stationeryOrder: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+    const service = new FinanceIntegrityService(prisma as never);
+    const report = await service.getIntegrityReport('accountant-user', [RoleName.ACCOUNTANT]);
+
+    expect(report.findings.successfulStationeryPaymentsWithoutOrder).toEqual([
+      { paymentId: 'stationery-payment-1', studentId: 'student-1', amount: '25.00' },
+    ]);
+    expect(report.healthy).toBe(false);
+  });
+
+  it('detects a paid stationery order whose linked payment no longer matches', async () => {
+    const prisma = {
+      studentInvoice: { findMany: jest.fn().mockResolvedValue([]) },
+      payment: { findMany: jest.fn().mockResolvedValue([]) },
+      paymentAllocation: { findMany: jest.fn().mockResolvedValue([]) },
+      walletTransaction: { findMany: jest.fn().mockResolvedValue([]) },
+      stationeryOrder: {
+        findMany: jest.fn().mockResolvedValue([{
+          id: 'order-1',
+          orderNumber: 'ST-1',
+          studentId: 'student-1',
+          guardianId: 'guardian-1',
+          status: 'PAID',
+          totalAmount: decimal('25.00'),
+          paymentId: 'payment-1',
+          payment: {
+            id: 'payment-1',
+            studentId: 'student-1',
+            guardianId: 'guardian-1',
+            amount: decimal('25.00'),
+            purpose: 'FEE',
+            status: PaymentStatus.SUCCEEDED,
+          },
+        }]),
+      },
+    };
+    const service = new FinanceIntegrityService(prisma as never);
+    const report = await service.getIntegrityReport('accountant-user', [RoleName.ACCOUNTANT]);
+
+    expect(report.findings.invalidStationeryPaymentLinks).toHaveLength(1);
+    expect(report.healthy).toBe(false);
+  });
+
 
 });

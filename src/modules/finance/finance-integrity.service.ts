@@ -17,7 +17,7 @@ export class FinanceIntegrityService {
       throw new ForbiddenException(`Finance integrity access is restricted for user ${actorUserId}.`);
     }
 
-    const [invoices, payments, allocations, walletTransactions] = await Promise.all([
+    const [invoices, payments, allocations, walletTransactions, stationeryOrders] = await Promise.all([
       this.prisma.studentInvoice.findMany({
         include: { lines: true },
         orderBy: { issuedAt: 'asc' },
@@ -76,6 +76,28 @@ export class FinanceIntegrityService {
           },
         },
         orderBy: { createdAt: 'asc' },
+      }),
+      this.prisma.stationeryOrder.findMany({
+        select: {
+          id: true,
+          orderNumber: true,
+          studentId: true,
+          guardianId: true,
+          status: true,
+          totalAmount: true,
+          paymentId: true,
+          payment: {
+            select: {
+              id: true,
+              studentId: true,
+              guardianId: true,
+              amount: true,
+              purpose: true,
+              status: true,
+            },
+          },
+        },
+        orderBy: { orderedAt: 'asc' },
       }),
     ]);
 
@@ -291,6 +313,78 @@ export class FinanceIntegrityService {
       .filter(([, balance]) => balance.lt(0))
       .map(([studentId, balance]) => ({ studentId, balance: balance.toFixed(2) }));
 
+    const successfulStationeryPaymentsById = new Map<string, number>();
+    const stationeryOrdersByPayment = new Map<string, typeof stationeryOrders>();
+    const successfulStationeryPaymentsWithoutOrder: Array<{
+      paymentId: string;
+      studentId: string | null;
+      amount: string;
+    }> = [];
+    const invalidStationeryPaymentLinks: Array<{
+      orderId: string;
+      orderNumber: string;
+      paymentId: string | null;
+      reason: string;
+    }> = [];
+
+    for (const order of stationeryOrders) {
+      if (order.paymentId) {
+        const existingOrders = stationeryOrdersByPayment.get(order.paymentId) ?? [];
+        existingOrders.push(order);
+        stationeryOrdersByPayment.set(order.paymentId, existingOrders);
+      }
+
+      if (['PAID', 'READY_FOR_COLLECTION', 'COLLECTED'].includes(order.status)) {
+        if (!order.payment) {
+          invalidStationeryPaymentLinks.push({
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            paymentId: order.paymentId,
+            reason: 'Fulfillable stationery order has no linked payment.',
+          });
+        } else if (
+          order.payment.status !== PaymentStatus.SUCCEEDED ||
+          order.payment.purpose !== 'STATIONERY' ||
+          order.payment.studentId !== order.studentId ||
+          order.payment.guardianId !== order.guardianId ||
+          !order.payment.amount.eq(order.totalAmount)
+        ) {
+          invalidStationeryPaymentLinks.push({
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            paymentId: order.payment.id,
+            reason: 'Stationery order does not match the linked successful STATIONERY payment identity or amount.',
+          });
+        }
+      }
+    }
+
+    for (const payment of payments) {
+      if (payment.purpose !== 'STATIONERY') continue;
+      const linkedOrders = stationeryOrdersByPayment.get(payment.id) ?? [];
+      successfulStationeryPaymentsById.set(payment.id, linkedOrders.length);
+      if (
+        (payment.status === PaymentStatus.SUCCEEDED || payment.status === PaymentStatus.REFUNDED) &&
+        linkedOrders.length === 0
+      ) {
+        successfulStationeryPaymentsWithoutOrder.push({
+          paymentId: payment.id,
+          studentId: payment.studentId,
+          amount: payment.amount.toFixed(2),
+        });
+      }
+      if (linkedOrders.length > 1) {
+        for (const order of linkedOrders) {
+          invalidStationeryPaymentLinks.push({
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            paymentId: payment.id,
+            reason: 'A stationery payment is linked to more than one order.',
+          });
+        }
+      }
+    }
+
     const totalInvoiceAmount = invoices.reduce(
       (sum, invoice) => sum.plus(invoice.lines.reduce((lineSum, line) => lineSum.plus(line.amountDue), new Prisma.Decimal(0))),
       new Prisma.Decimal(0),
@@ -329,6 +423,8 @@ export class FinanceIntegrityService {
         invalidWalletReversals,
         successfulWalletTopUpsWithoutLedger,
         negativeWalletBalances,
+        successfulStationeryPaymentsWithoutOrder,
+        invalidStationeryPaymentLinks,
       },
       healthy:
         orphanAllocations.length === 0 &&
@@ -342,7 +438,9 @@ export class FinanceIntegrityService {
         invalidWalletDirections.length === 0 &&
         invalidWalletReversals.length === 0 &&
         successfulWalletTopUpsWithoutLedger.length === 0 &&
-        negativeWalletBalances.length === 0,
+        negativeWalletBalances.length === 0 &&
+        successfulStationeryPaymentsWithoutOrder.length === 0 &&
+        invalidStationeryPaymentLinks.length === 0,
     };
   }
 }
