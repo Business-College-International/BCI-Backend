@@ -87,6 +87,7 @@ export class RefundService {
     this.assertManage(roles);
 
     return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Refund" WHERE id = ${refundId} FOR UPDATE`;
       const refund = await tx.refund.findUnique({ where: { id: refundId } });
       if (!refund) throw new NotFoundException('Refund not found.');
       if (refund.status !== PaymentStatus.PENDING || refund.approvedBy) {

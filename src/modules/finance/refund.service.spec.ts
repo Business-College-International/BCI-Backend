@@ -143,6 +143,20 @@ describe('RefundService', () => {
       .rejects.toBeInstanceOf(ForbiddenException);
   });
 
+  it('locks the refund row before evaluating approval eligibility', async () => {
+    const prisma = mockPrisma();
+    const deps = mockDeps();
+    prisma.$transaction.mockImplementation(async (callback: (client: any) => unknown) => callback(prisma));
+    prisma.refund.findUnique.mockResolvedValue({ id: 'refund-1', status: PaymentStatus.PENDING, requestedBy: 'requester', approvedBy: null });
+    prisma.refund.updateMany.mockResolvedValue({ count: 0 });
+    const service = new RefundService(prisma, deps.disbursements, deps.journal);
+
+    await expect(service.approveRefund('refund-1', 'approver-1', [RoleName.ACCOUNTANT]))
+      .rejects.toBeInstanceOf(ConflictException);
+
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects an approval race when another approver wins the conditional transition', async () => {
     const prisma = mockPrisma();
     const deps = mockDeps();
