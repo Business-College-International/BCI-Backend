@@ -58,6 +58,46 @@ describe('PayrollDisbursementService', () => {
     expect(result).toMatchObject({ attemptId: 'attempt-1', status: DisbursementStatus.PROCESSING, providerReference: 'moolre-1' });
   });
 
+  it('does not initiate the provider a second time for an existing same-key processing attempt', async () => {
+    const tx = makeTx();
+    tx.payrollEntry.findUnique.mockResolvedValue({
+      id: 'entry-1',
+      status: 'approved',
+      netPay: new Prisma.Decimal('5000.00'),
+      period: { id: 'period-1', status: PayrollPeriodStatus.APPROVED, code: '2026-09' },
+      staff: { personId: 'staff-1', staffIdNo: 'ST-1', employmentStatus: 'active', person: { phone: '0244000000' } },
+      disbursementAttempts: [{
+        id: 'attempt-1',
+        status: DisbursementStatus.PROCESSING,
+        idempotencyKey: 'same-key',
+        amount: new Prisma.Decimal('5000.00'),
+        purpose: 'PAYROLL',
+        providerReference: 'provider-ref-1',
+      }],
+    });
+    tx.disbursementAttempt.findUnique.mockResolvedValue({
+      id: 'attempt-1',
+      status: DisbursementStatus.PROCESSING,
+      providerReference: 'provider-ref-1',
+      idempotencyKey: 'same-key',
+      payrollPeriodId: 'period-1',
+      payrollEntryId: 'entry-1',
+    });
+    const provider = {
+      initiateTransfer: jest.fn(),
+      getTransferStatus: jest.fn().mockResolvedValue({
+        providerReference: 'provider-ref-1',
+        status: 'PENDING',
+        mock: true,
+      }),
+    };
+    const service = new PayrollDisbursementService(makePrisma(tx), provider as any);
+    await expect(service.initiate('entry-1', 'user-1', [RoleName.ACCOUNTANT], 'same-key'))
+      .resolves.toMatchObject({ attemptId: 'attempt-1', status: DisbursementStatus.PROCESSING });
+    expect(provider.initiateTransfer).not.toHaveBeenCalled();
+    expect(provider.getTransferStatus).toHaveBeenCalledWith('bci-payroll-entry-1-same-key');
+  });
+
   it('reconciles an ambiguous initiation using the deterministic external reference', async () => {
     const tx = makeTx();
     tx.disbursementAttempt.findUnique.mockResolvedValue({

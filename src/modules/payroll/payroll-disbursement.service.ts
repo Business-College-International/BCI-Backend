@@ -36,6 +36,7 @@ export class PayrollDisbursementService {
       amount: string;
       phone: string;
       network: string | undefined;
+      reconcileOnly?: boolean;
     };
 
     try {
@@ -75,6 +76,7 @@ export class PayrollDisbursementService {
               attemptId: processing.id,
               referenceId: `bci-payroll-${entry.id}-${key}`,
               periodId: entry.period.id,
+              reconcileOnly: true,
               entryId: entry.id,
               amount: entry.netPay.minus(succeeded).toFixed(2),
               phone: entry.staff.person.phone,
@@ -122,6 +124,23 @@ export class PayrollDisbursementService {
         throw new ConflictException('This payroll disbursement request has already been reserved.');
       }
       throw error;
+    }
+
+    if (reservation.reconcileOnly) {
+      try {
+        const status = await this.disbursements.getTransferStatus(reservation.referenceId);
+        return this.applyProviderStatus(
+          reservation.attemptId,
+          reservation.periodId,
+          status.status,
+          status.providerReference,
+          actorUserId,
+        );
+      } catch {
+        throw new ServiceUnavailableException(
+          'An existing payroll disbursement is still processing. Provider status could not be verified safely.',
+        );
+      }
     }
 
     let provider;
