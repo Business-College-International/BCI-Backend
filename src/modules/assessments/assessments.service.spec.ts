@@ -9,7 +9,7 @@ type MockTx = {
   staff: { findUnique: jest.Mock };
   teacherAssignment: { findFirst: jest.Mock; findMany: jest.Mock };
   assessment: { create: jest.Mock; findUnique: jest.Mock };
-  enrolment: { findMany: jest.Mock };
+  enrolment: { findFirst: jest.Mock; findMany: jest.Mock };
   assessmentResult: { upsert: jest.Mock; findMany: jest.Mock };
   auditLog: { create: jest.Mock };
 };
@@ -22,7 +22,7 @@ function makeTx(): MockTx {
     staff: { findUnique: jest.fn() },
     teacherAssignment: { findFirst: jest.fn(), findMany: jest.fn() },
     assessment: { create: jest.fn(), findUnique: jest.fn() },
-    enrolment: { findMany: jest.fn() },
+    enrolment: { findFirst: jest.fn(), findMany: jest.fn() },
     assessmentResult: { upsert: jest.fn(), findMany: jest.fn() },
     auditLog: { create: jest.fn() },
   };
@@ -123,6 +123,28 @@ describe('AssessmentsService', () => {
     }, 'teacher-user', [RoleName.TEACHER])).rejects.toBeInstanceOf(BadRequestException);
     expect(tx.assessmentResult.upsert).not.toHaveBeenCalled();
   });
+  it('denies a teacher requesting assessments for a term where they are not assigned', async () => {
+    const tx = makeTx();
+    const prisma = makePrisma(tx);
+    prisma.student.findUnique.mockResolvedValue({ id: 'student-1' });
+    prisma.guardian.findUnique.mockResolvedValue(null);
+    tx.staff.findUnique.mockResolvedValue({ personId: 'staff-1' });
+    tx.enrolment.findMany.mockResolvedValue([]);
+    // Historical term must resolve through the requested enrolment scope.
+    tx.teacherAssignment.findFirst.mockResolvedValue(null);
+
+    const service = new AssessmentsService(prisma);
+
+    await expect(
+      service.getStudentAssessments('student-1', 'teacher-user', [RoleName.TEACHER], 'historical-term-1'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(tx.enrolment.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { studentId: 'student-1', status: 'ACTIVE', termId: 'historical-term-1' },
+    }));
+    expect(prisma.assessmentResult.findMany).not.toHaveBeenCalled();
+  });
+
 });
 
 describe('AssessmentsService assessment roster', () => {

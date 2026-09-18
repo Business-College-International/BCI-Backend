@@ -8,6 +8,8 @@ function makePrisma() {
     guardian: { findUnique: jest.fn() },
     guardianStudent: { findUnique: jest.fn() },
     enrolment: { findFirst: jest.fn() },
+    staff: { findUnique: jest.fn() },
+    teacherAssignment: { findFirst: jest.fn() },
     attendanceSession: { findMany: jest.fn() },
     $transaction: jest.fn(),
   } as any;
@@ -136,6 +138,25 @@ describe('AttendanceService access and integrity', () => {
     await expect(
       service.getStudentAttendance('student-1', 'guardian-user-1', [RoleName.GUARDIAN]),
     ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('denies a teacher requesting attendance for a term where they are not assigned', async () => {
+    const prisma = makePrisma();
+    prisma.student.findUnique.mockResolvedValue({ id: 'student-1' });
+    prisma.guardian.findUnique.mockResolvedValue(null);
+    prisma.staff.findUnique.mockResolvedValue({ personId: 'teacher-1' });
+    prisma.enrolment.findFirst.mockResolvedValue(null);
+
+    const service = new AttendanceService(prisma);
+
+    await expect(
+      service.getStudentAttendance('student-1', 'teacher-user-1', [RoleName.TEACHER], 'historical-term-1'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(prisma.enrolment.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { studentId: 'student-1', status: 'ACTIVE', termId: 'historical-term-1' },
+    }));
+    expect(prisma.attendanceSession.findMany).not.toHaveBeenCalled();
   });
 
   it('allows privileged school roles to read attendance', async () => {

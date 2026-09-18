@@ -257,7 +257,7 @@ export class AttendanceService {
     const student = await this.prisma.student.findUnique({ where: { id: studentId }, select: { id: true } });
     if (!student) throw new NotFoundException('Student not found.');
 
-    const scope = await this.resolveStudentScope(studentId, actorUserId, roles);
+    const scope = await this.resolveStudentScope(studentId, actorUserId, roles, termId);
     if (!scope.allowed) throw new ForbiddenException('You do not have access to this student attendance.');
     if (scope.isGuardian && !scope.canViewAcademic) {
       throw new ForbiddenException('This guardian is not permitted to view academic records for this ward.');
@@ -326,7 +326,7 @@ export class AttendanceService {
     if (!assignment) throw new ForbiddenException('You are not assigned to this attendance class/subject for the term.');
   }
 
-  private async resolveStudentScope(studentId: string, actorUserId: string, roles: RoleName[]) {
+  private async resolveStudentScope(studentId: string, actorUserId: string, roles: RoleName[], requestedTermId?: string) {
     if (roles.some((role) => PRIVILEGED_ATTENDANCE_ROLES.has(role))) {
       return { allowed: true, isGuardian: false, canViewAcademic: true };
     }
@@ -342,7 +342,7 @@ export class AttendanceService {
 
     if (roles.includes(RoleName.TEACHER)) {
       const activeEnrolment = await this.prisma.enrolment.findFirst({
-        where: { studentId, status: 'ACTIVE' },
+        where: { studentId, status: 'ACTIVE', ...(requestedTermId ? { termId: requestedTermId } : {}) },
         select: { classId: true, termId: true },
         orderBy: { enrolledAt: 'desc' },
       });

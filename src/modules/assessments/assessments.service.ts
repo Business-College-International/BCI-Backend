@@ -177,6 +177,7 @@ export class AssessmentsService {
     const student = await this.prisma.student.findUnique({ where: { id: studentId }, select: { id: true } });
     if (!student) throw new NotFoundException('Student not found.');
 
+    const requestedTermId = termId;
     const guardian = await this.prisma.guardian.findUnique({ where: { userId: actorUserId }, select: { personId: true } });
     let allowed = roles.some((role) => PRIVILEGED_ASSESSMENT_ROLES.has(role));
     let guardianRestricted = false;
@@ -195,7 +196,7 @@ export class AssessmentsService {
     if (roles.includes(RoleName.TEACHER) && !allowed) {
       const staff = await this.prisma.staff.findUnique({ where: { userId: actorUserId }, select: { personId: true } });
       const enrolment = await this.prisma.enrolment.findFirst({
-        where: { studentId, status: 'ACTIVE' },
+        where: { studentId, status: 'ACTIVE', ...(requestedTermId ? { termId: requestedTermId } : {}) },
         orderBy: { enrolledAt: 'desc' },
         select: { classId: true, termId: true },
       });
