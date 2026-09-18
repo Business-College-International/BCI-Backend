@@ -111,6 +111,10 @@ enum WalletTransactionType {
   WITHDRAWAL
   REVERSAL
 }
+enum WalletTransactionDirection {
+  CREDIT
+  DEBIT
+}
 enum ExpenseStatus {
   DRAFT
   SUBMITTED
@@ -732,10 +736,11 @@ model Payment {
   failureCode       String?
   failureMessage    String?
 
-  allocations PaymentAllocation[]
-  receipt     Receipt?
-  refunds     Refund[]
-  attempts    PaymentProviderAttempt[]
+  allocations        PaymentAllocation[]
+  receipt            Receipt?
+  refunds            Refund[]
+  attempts           PaymentProviderAttempt[]
+  walletTransactions WalletTransaction[]
 
   @@index([studentId, createdAt])
   @@index([guardianId, createdAt])
@@ -840,18 +845,26 @@ model Wallet {
 }
 
 model WalletTransaction {
-  id                String                @id @default(uuid())
+  id                String                    @id @default(uuid())
   walletId          String
   type              WalletTransactionType
-  amount            Decimal               @db.Decimal(12, 2)
+  direction         WalletTransactionDirection?
+  amount            Decimal                   @db.Decimal(12, 2)
+  paymentId         String?                   @unique
+  reversalOfId      String?                   @unique
   providerReference String?
   processedBy       String?
-  createdAt         DateTime              @default(now())
+  createdAt         DateTime                  @default(now())
   note              String?
 
-  wallet Wallet @relation(fields: [walletId], references: [studentId], onDelete: Restrict)
+  wallet     Wallet           @relation(fields: [walletId], references: [studentId], onDelete: Restrict)
+  payment    Payment?         @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  reversalOf WalletTransaction? @relation("WalletTransactionReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
+  reversal   WalletTransaction? @relation("WalletTransactionReversal")
+
   @@index([walletId, createdAt])
   @@index([providerReference])
+  @@index([walletId, direction, createdAt])
 }
 
 model StationeryItem {
