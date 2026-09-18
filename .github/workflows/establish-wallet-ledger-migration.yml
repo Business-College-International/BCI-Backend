@@ -27,6 +27,7 @@ jobs:
     env:
       DATABASE_URL: postgresql://bci:bci@localhost:5432/bci_migration?schema=public
       DIRECT_URL: postgresql://bci:bci@localhost:5432/bci_migration?schema=public
+      SHADOW_DATABASE_URL: postgresql://bci:bci@localhost:5432/bci_shadow?schema=public
       NODE_ENV: test
       JWT_ACCESS_SECRET: wallet-ledger-ci-only-secret
     steps:
@@ -42,8 +43,9 @@ jobs:
 
       - name: Generate wallet ledger migration
         run: |
+          PGPASSWORD=bci psql -h localhost -U bci -d postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE bci_shadow'
           mkdir -p prisma/migrations/20260918070000_wallet_ledger_foundation
-          npx prisma migrate diff --from-migrations prisma/migrations --to-schema-datamodel prisma/schema.prisma --script > prisma/migrations/20260918070000_wallet_ledger_foundation/migration.sql
+          npx prisma migrate diff --from-migrations prisma/migrations --to-schema-datamodel prisma/schema.prisma --shadow-database-url "$SHADOW_DATABASE_URL" --script > prisma/migrations/20260918070000_wallet_ledger_foundation/migration.sql
 
       - name: Deploy full migration history to clean PostgreSQL
         run: npx prisma migrate deploy
