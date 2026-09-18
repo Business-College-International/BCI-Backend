@@ -73,7 +73,7 @@ export class PayrollDisbursementService {
           if (processing.idempotencyKey === key) {
             return {
               attemptId: processing.id,
-              referenceId: processing.idempotencyKey!,
+              referenceId: `bci-payroll-${entry.id}-${key}`,
               periodId: entry.period.id,
               entryId: entry.id,
               amount: entry.netPay.minus(succeeded).toFixed(2),

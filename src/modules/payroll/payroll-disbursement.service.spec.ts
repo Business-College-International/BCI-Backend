@@ -39,6 +39,14 @@ describe('PayrollDisbursementService', () => {
       disbursementAttempts: [{ id: 'old-1', status: DisbursementStatus.SUCCEEDED, amount: new Prisma.Decimal('1000.00'), purpose: 'PAYROLL' }],
     });
     tx.disbursementAttempt.create.mockResolvedValue({ id: 'attempt-1' });
+    tx.disbursementAttempt.findUnique.mockResolvedValue({
+      id: 'attempt-1',
+      status: DisbursementStatus.PROCESSING,
+      providerReference: 'moolre-1',
+      payrollPeriodId: 'period-1',
+      payrollEntryId: 'entry-1',
+      payrollEntry: { netPay: new Prisma.Decimal('5000.00') },
+    });
     const provider = { initiateTransfer: jest.fn().mockResolvedValue({ providerReference: 'moolre-1', status: 'PENDING', mock: true }) };
 
     const service = new PayrollDisbursementService(makePrisma(tx), provider as any);
