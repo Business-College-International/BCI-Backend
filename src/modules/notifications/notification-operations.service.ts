@@ -33,6 +33,7 @@ export class NotificationOperationsService {
   async requeue(id: string, actorUserId: string, roles: RoleName[]) {
     this.assertManager(roles);
     return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "NotificationDelivery" WHERE id = ${id} FOR UPDATE`;
       const delivery = await tx.notificationDelivery.findUnique({ where: { id }, select: { id: true, status: true, channel: true, provider: true } });
       if (!delivery) throw new NotFoundException('Notification delivery not found.');
       if (delivery.status !== 'failed') throw new ForbiddenException('Only failed deliveries can be requeued.');
