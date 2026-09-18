@@ -172,7 +172,6 @@ describe('WalletOperationsService', () => {
       currency: 'GHS',
       transactions: [
         { id: 'top-up', type: WalletTransactionType.TOP_UP, direction: WalletTransactionDirection.CREDIT, amount: new Prisma.Decimal('100'), reversalOfId: null, paymentId: 'payment-1' },
-        { id: 'withdrawal', type: WalletTransactionType.WITHDRAWAL, direction: WalletTransactionDirection.DEBIT, amount: new Prisma.Decimal('75'), reversalOfId: null, paymentId: null },
       ],
     });
     tx.walletTransaction.create.mockResolvedValue({
