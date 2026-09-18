@@ -1,4 +1,5 @@
-import { RoleName,  BadRequestException, ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
+import { RoleName } from '@prisma/client';
 import { Prisma } from '@prisma/client';
 import { StationeryOperationsService } from './stationery-operations.service';
 
