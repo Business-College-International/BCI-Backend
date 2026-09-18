@@ -182,6 +182,8 @@ export class AttendanceService {
 
   async markAttendance(sessionId: string, dto: MarkAttendanceDto, actorUserId: string, roles: RoleName[]) {
     return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "AttendanceSession" WHERE id = ${sessionId} FOR UPDATE`;
+
       const session = await tx.attendanceSession.findUnique({
         where: { id: sessionId },
         include: { term: { select: { status: true } } },
