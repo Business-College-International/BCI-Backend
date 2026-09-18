@@ -195,7 +195,7 @@ export class AssessmentsService {
     if (roles.includes(RoleName.TEACHER) && !allowed) {
       const staff = await this.prisma.staff.findUnique({ where: { userId: actorUserId }, select: { personId: true } });
       const enrolment = await this.prisma.enrolment.findFirst({
-        where: { studentId, status: 'ACTIVE' },
+        where: { studentId, status: 'ACTIVE', ...(requestedTermId ? { termId: requestedTermId } : {}) },
         orderBy: { enrolledAt: 'desc' },
         select: { classId: true, termId: true },
       });
@@ -214,6 +214,8 @@ export class AssessmentsService {
 
     if (!allowed) throw new ForbiddenException('You do not have access to this student assessment record.');
     if (guardianRestricted) throw new ForbiddenException('This guardian is not permitted to view academic records for this ward.');
+
+    const requestedTermId = termId;
 
     const results = await this.prisma.assessmentResult.findMany({
       where: {
