@@ -74,14 +74,15 @@ export class GuardiansService {
   }
 
   async updateMyProfile(userId: string, dto: UpdateMyProfileDto) {
-    const guardian = await this.prisma.guardian.findUnique({
-      where: { userId },
-      include: { person: true },
-    });
-
-    if (!guardian) throw new NotFoundException('Guardian profile not found.');
-
     return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "personId" FROM "Guardian" WHERE "userId" = ${userId} FOR UPDATE`;
+
+      const guardian = await tx.guardian.findUnique({
+        where: { userId },
+        include: { person: true },
+      });
+      if (!guardian) throw new NotFoundException('Guardian profile not found.');
+
       const person = await tx.person.update({
         where: { id: guardian.personId },
         data: {
