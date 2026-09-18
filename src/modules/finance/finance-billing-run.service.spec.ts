@@ -1,4 +1,5 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { FinanceBillingRunService } from './finance-billing-run.service';
 
 function prismaStub(context: any) {
@@ -67,5 +68,45 @@ describe('FinanceBillingRunService', () => {
   it('rejects non-finance billing roles', async () => {
     const service = new FinanceBillingRunService(prismaStub({ term, enrolments: [], schedules: [] }) as never);
     await expect(service.preview({ termId: 'term-1' }, ['TEACHER'] as any)).rejects.toBeInstanceOf(ForbiddenException);
+  });  it('locks each student row before issuing a billing invoice', async () => {
+    const context = {
+      term,
+      enrolments: [{
+        student: { id: 'student-1', admissionNumber: 'BCI-1', firstName: 'Ama', lastName: 'Mensah', status: 'ACTIVE' },
+        class: { id: 'class-1', name: 'BUSINESS A' },
+        level: 'SHS1',
+        programme: 'BUSINESS',
+      }],
+      schedules: [{ id: 'fee-1', level: 'SHS1', programme: 'BUSINESS', amount: new Prisma.Decimal('1200.00'), isOptional: false }],
+      openInvoices: [],
+    };
+    const tx = {
+      $executeRaw: jest.fn().mockResolvedValue([]),
+      studentInvoice: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({
+          id: 'invoice-1',
+          invoiceNumber: 'BCI-2026-TEST',
+          studentId: 'student-1',
+          lines: [{ amountDue: new Prisma.Decimal('1200.00') }],
+        }),
+      },
+      feeSchedule: { findMany: jest.fn().mockResolvedValue(context.schedules) },
+      auditLog: { create: jest.fn().mockResolvedValue({}) },
+    };
+    const prisma = prismaStub(context) as any;
+    prisma.$transaction = jest.fn(async (callback: (value: typeof tx) => unknown) => callback(tx));
+    prisma.term.findUnique.mockResolvedValue(term);
+    prisma.enrolment.findMany.mockResolvedValue(context.enrolments);
+    prisma.feeSchedule.findMany.mockResolvedValue(context.schedules);
+    prisma.studentInvoice.findMany.mockResolvedValue([]);
+
+    const service = new FinanceBillingRunService(prisma);
+    const result = await service.execute({ termId: 'term-1' }, 'actor-1', ['ACCOUNTANT'] as any);
+
+    expect(result.issuedCount).toBe(1);
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
   });
+
+
 });
