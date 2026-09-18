@@ -3,6 +3,25 @@ import { Prisma } from '@prisma/client';
 import { StationeryOperationsService } from './stationery-operations.service';
 
 describe('StationeryOperationsService', () => {
+  it('locks an order before completing collection', async () => {
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([]),
+      stationeryOrder: {
+        findUnique: jest.fn().mockResolvedValue({ id: 'order-1', status: 'READY_FOR_COLLECTION' }),
+        update: jest.fn().mockResolvedValue({ id: 'order-1', status: 'COLLECTED' }),
+      },
+      auditLog: { create: jest.fn().mockResolvedValue({}) },
+    };
+    const prisma = { $transaction: jest.fn(async (callback: (value: typeof tx) => unknown) => callback(tx)) };
+    const service = new StationeryOperationsService(prisma as never);
+
+    await service.markCollected('order-1', 'actor-1', [RoleName.OFFICE]);
+
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(tx.stationeryOrder.update).toHaveBeenCalled();
+  });
+
+
   const tx = {
     $executeRaw: jest.fn().mockResolvedValue([]),
     stationeryOrder: { findUnique: jest.fn(), findFirst: jest.fn(), update: jest.fn() },

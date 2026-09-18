@@ -197,6 +197,7 @@ export class StationeryOperationsService {
   async markCollected(orderId: string, actorUserId: string, roles: RoleName[]) {
     this.assertManagement(roles);
     return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "StationeryOrder" WHERE id = ${orderId} FOR UPDATE`;
       const order = await tx.stationeryOrder.findUnique({ where: { id: orderId } });
       if (!order) throw new NotFoundException('Stationery order not found.');
       if (order.status !== 'READY_FOR_COLLECTION') throw new BadRequestException('Only ready stationery orders can be collected.');
@@ -222,6 +223,7 @@ export class StationeryOperationsService {
   async cancelDraft(orderId: string, actorUserId: string, roles: RoleName[]) {
     this.assertManagement(roles);
     return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "StationeryOrder" WHERE id = ${orderId} FOR UPDATE`;
       const order = await tx.stationeryOrder.findUnique({ where: { id: orderId } });
       if (!order) throw new NotFoundException('Stationery order not found.');
       if (order.status !== 'DRAFT') throw new BadRequestException('Only draft stationery orders can be cancelled.');
