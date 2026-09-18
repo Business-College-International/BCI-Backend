@@ -1,5 +1,5 @@
 import { ConflictException } from '@nestjs/common';
-import { Prisma, RoleName, WalletTransactionType } from '@prisma/client';
+import { Prisma, RoleName, WalletTransactionDirection, WalletTransactionType } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { WalletOperationsService } from './wallet-operations.service';
 
