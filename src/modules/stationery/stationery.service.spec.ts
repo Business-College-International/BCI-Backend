@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { Prisma, RoleName } from '@prisma/client';
 import { StationeryService } from './stationery.service';
 
@@ -66,7 +66,7 @@ describe('StationeryService', () => {
     const service = new StationeryService(prisma as never, {} as never);
 
     await expect(service.initiatePayment('order-1', {}, 'guardian-user', [RoleName.GUARDIAN], 'lock-key'))
-      .rejects.toBeInstanceOf(ForbiddenException);
+      .rejects.toBeInstanceOf(NotFoundException);
 
     expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
   });
