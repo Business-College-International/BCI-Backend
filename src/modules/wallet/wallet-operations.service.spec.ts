@@ -151,7 +151,7 @@ describe('WalletOperationsService', () => {
       status: 'COMPLETED',
     });
 
-    expect(prisma.$queryRaw).toHaveBeenCalled();
+    expect(tx.$queryRaw).toHaveBeenCalled();
     expect(tx.walletTransaction.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         walletId: 'student-1',
