@@ -67,7 +67,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git rm .github/workflows/establish-initial-migration.yml
-          git add prisma/migrations
-          git diff --cached --check
+          git add -A prisma/migrations
+          git status --short
+          git diff --cached --stat
           git commit -m "chore(db): establish verified initial Prisma migration"
           git push origin HEAD:chore/establish-initial-migration
