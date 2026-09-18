@@ -2,17 +2,31 @@ import { ConflictException, BadRequestException, NotFoundException } from '@nest
 import { StaffManagementService } from './staff-management.service';
 
 describe('StaffManagementService', () => {
-  it('blocks termination when unresolved payroll exists', async () => {
-    const prisma = {
-      staff: { findUnique: jest.fn().mockResolvedValue({ personId: 'staff-1', department: 'Science', contractType: 'permanent', employmentStatus: 'active' }) },
+  it('blocks termination when unresolved payroll exists after locking staff state', async () => {
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ personId: 'staff-1' }]),
+      staff: {
+        findUnique: jest.fn().mockResolvedValue({
+          personId: 'staff-1',
+          department: 'Science',
+          contractType: 'permanent',
+          employmentStatus: 'active',
+        }),
+        update: jest.fn(),
+      },
       payrollEntry: { count: jest.fn().mockResolvedValue(1) },
-      $transaction: jest.fn(),
+      auditLog: { create: jest.fn() },
+    };
+    const prisma = {
+      $transaction: jest.fn(async (callback: (value: typeof tx) => unknown) => callback(tx)),
     };
     const service = new StaffManagementService(prisma as never);
 
     await expect(service.updateStaffRecord('staff-1', { employmentStatus: 'terminated' }, 'actor-1'))
       .rejects.toBeInstanceOf(ConflictException);
-    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(tx.payrollEntry.count).toHaveBeenCalled();
+    expect(tx.staff.update).not.toHaveBeenCalled();
   });
 
   it('locks the staff row before checking unresolved payroll during termination', async () => {
