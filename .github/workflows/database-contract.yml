@@ -2,6 +2,13 @@ name: Backend Database Contract
 
 on:
   pull_request:
+    paths:
+      - 'prisma/schema.prisma'
+      - 'prisma/seed.ts'
+      - 'prisma/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/database-contract.yml'
   workflow_dispatch:
 
 permissions:
