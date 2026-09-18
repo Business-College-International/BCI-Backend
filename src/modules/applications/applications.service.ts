@@ -139,6 +139,12 @@ export class ApplicationsService {
   async admit(id: string, dto: AdmitApplicationDto, actorUserId: string) {
     try {
       return await this.prisma.$transaction(async (tx) => {
+        // Serialize admission for the application and destination class.
+        // The class lock is what makes the capacity check authoritative when
+        // multiple admissions target the same capacity-limited class.
+        await tx.$queryRaw`SELECT id FROM "Application" WHERE id = ${id} FOR UPDATE`;
+        await tx.$queryRaw`SELECT id FROM "SchoolClass" WHERE id = ${dto.classId} FOR UPDATE`;
+
         const current = await tx.application.findUnique({ where: { id } });
         if (!current) throw new NotFoundException('Application not found');
         if (current.status !== ApplicationStatus.UNDER_REVIEW) {
