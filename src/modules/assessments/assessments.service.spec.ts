@@ -85,7 +85,7 @@ describe('AssessmentsService', () => {
 
     await expect(service.enterResults('assessment-1', {
       results: [{ studentId: 'student-1', score: 45 }],
-    }, 'teacher-user', [RoleName.TEACHER])).rejects.toBeInstanceOf(BadRequestException);
+    }, 'office-user', [RoleName.OFFICE])).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('rejects a score above the assessment maximum', async () => {
