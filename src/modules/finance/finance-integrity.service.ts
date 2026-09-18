@@ -25,6 +25,8 @@ export class FinanceIntegrityService {
       this.prisma.payment.findMany({
         select: {
           id: true,
+          studentId: true,
+          purpose: true,
           status: true,
           amount: true,
           completedAt: true,
