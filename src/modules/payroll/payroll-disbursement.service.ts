@@ -161,12 +161,26 @@ export class PayrollDisbursementService {
     this.requireManagement(roles);
     const attempt = await this.prisma.disbursementAttempt.findUnique({
       where: { id: attemptId },
-      select: { id: true, status: true, providerReference: true, payrollPeriodId: true, payrollEntryId: true },
+      select: { id: true, status: true, providerReference: true, idempotencyKey: true, payrollPeriodId: true, payrollEntryId: true },
     });
     if (!attempt) throw new NotFoundException('Payroll disbursement attempt not found.');
     if (!attempt.payrollPeriodId || !attempt.payrollEntryId) throw new ConflictException('Disbursement attempt is not linked to payroll.');
 
-    const referenceId = attempt.providerReference ?? attempt.id;
+    if (attempt.status === DisbursementStatus.SUCCEEDED || attempt.status === DisbursementStatus.FAILED) {
+      return {
+        attemptId: attempt.id,
+        status: attempt.status,
+        providerReference: attempt.providerReference,
+      };
+    }
+
+    const referenceId = attempt.providerReference
+      ?? (attempt.payrollEntryId && attempt.idempotencyKey
+        ? `bci-payroll-${attempt.payrollEntryId}-${attempt.idempotencyKey}`
+        : null);
+    if (!referenceId) {
+      throw new ConflictException('The processing payroll disbursement has no provider reference or deterministic external reference. Reconciliation requires manual review.');
+    }
     let status;
     try {
       status = await this.disbursements.getTransferStatus(referenceId);

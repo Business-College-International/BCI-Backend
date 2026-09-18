@@ -58,6 +58,37 @@ describe('PayrollDisbursementService', () => {
     expect(result).toMatchObject({ attemptId: 'attempt-1', status: DisbursementStatus.PROCESSING, providerReference: 'moolre-1' });
   });
 
+  it('reconciles an ambiguous initiation using the deterministic external reference', async () => {
+    const tx = makeTx();
+    tx.disbursementAttempt.findUnique.mockResolvedValue({
+      id: 'attempt-1',
+      status: DisbursementStatus.PROCESSING,
+      providerReference: null,
+      idempotencyKey: 'salary-key-1',
+      payrollPeriodId: 'period-1',
+      payrollEntryId: 'entry-1',
+    });
+    const provider = {
+      getTransferStatus: jest.fn().mockResolvedValue({
+        providerReference: 'moolre-tx-ambiguous',
+        status: 'SUCCESSFUL',
+        mock: true,
+      }),
+    };
+    const service = new PayrollDisbursementService(makePrisma(tx), provider as any);
+
+    const apply = jest.spyOn(service as any, 'applyProviderStatus').mockResolvedValue({ status: DisbursementStatus.PROCESSING });
+    await service.reconcile('attempt-1', 'user-1', [RoleName.ACCOUNTANT]);
+    expect(provider.getTransferStatus).toHaveBeenCalledWith('bci-payroll-entry-1-salary-key-1');
+    expect(apply).toHaveBeenCalledWith(
+      'attempt-1',
+      'period-1',
+      'SUCCESSFUL',
+      'moolre-tx-ambiguous',
+      'user-1',
+    );
+  });
+
   it('reconciles a successful provider result into paid entry and paid period when all entries are settled', async () => {
     const tx = makeTx();
     tx.disbursementAttempt.findUnique.mockResolvedValue({
