@@ -102,6 +102,7 @@ export class StationeryOperationsService {
 
     try {
       return await this.prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT id FROM "StationeryOrder" WHERE id = ${orderId} FOR UPDATE`;
         const order = await tx.stationeryOrder.findUnique({
           where: { id: orderId },
           include: {

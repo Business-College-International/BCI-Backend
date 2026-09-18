@@ -16,6 +16,21 @@ describe('StationeryOperationsService', () => {
 
   beforeEach(() => jest.clearAllMocks());
 
+  it('locks the order row before checking fulfillment state', async () => {
+    tx.stationeryOrder.findUnique.mockResolvedValue({
+      id: 'order-1',
+      orderNumber: 'ST-1',
+      status: 'READY_FOR_COLLECTION',
+      paymentId: 'pay-1',
+      lines: [],
+    });
+
+    await expect(service.markReadyForCollection('order-1', 'actor-1', ['OFFICE' as any]))
+      .rejects.toThrow(BadRequestException);
+
+    expect(tx.$executeRaw).toHaveBeenCalled();
+  });
+
   it('rejects fulfillment without a linked payment', async () => {
     tx.stationeryOrder.findUnique.mockResolvedValue({
       id: 'order-1',
