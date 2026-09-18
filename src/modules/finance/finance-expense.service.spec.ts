@@ -71,7 +71,11 @@ describe('FinanceExpenseService', () => {
   it('locks an expense row before submitting it', async () => {
     const tx = makeTx();
     tx.expense.findUnique.mockResolvedValue({ id: 'e1', enteredBy: 'owner', status: ExpenseStatus.DRAFT });
-    tx.expense.update.mockResolvedValue({ id: 'e1', enteredBy: 'owner', status: ExpenseStatus.SUBMITTED });
+    tx.expense.update.mockResolvedValue({
+      id: 'e1', category: 'Office', amount: new Prisma.Decimal('100.00'), currency: 'GHS',
+      description: null, receiptUrl: null, enteredBy: 'owner', approvedBy: null,
+      status: ExpenseStatus.SUBMITTED, createdAt: new Date(), approvedAt: null, paidAt: null,
+    });
     tx.auditLog.create.mockResolvedValue({});
     const prisma = { $transaction: jest.fn(async (callback: (value: typeof tx) => unknown) => callback(tx)) };
     const service = new FinanceExpenseService(prisma as never);
@@ -87,7 +91,11 @@ describe('FinanceExpenseService', () => {
     tx.expense.findUnique.mockResolvedValue({ id: 'e1', enteredBy: 'owner', status: ExpenseStatus.SUBMITTED });
     tx.expense.updateMany.mockResolvedValue({ count: 1 });
     tx.expense.findUnique.mockResolvedValueOnce({ id: 'e1', enteredBy: 'owner', status: ExpenseStatus.SUBMITTED });
-    tx.expense.findUnique.mockResolvedValueOnce({ id: 'e1', enteredBy: 'owner', status: ExpenseStatus.APPROVED });
+    tx.expense.findUnique.mockResolvedValueOnce({
+      id: 'e1', category: 'Office', amount: new Prisma.Decimal('100.00'), currency: 'GHS',
+      description: null, receiptUrl: null, enteredBy: 'owner', approvedBy: 'approver',
+      status: ExpenseStatus.APPROVED, createdAt: new Date(), approvedAt: new Date(), paidAt: null,
+    });
     tx.auditLog.create.mockResolvedValue({});
     const prisma = { $transaction: jest.fn(async (callback: (value: typeof tx) => unknown) => callback(tx)) };
     const service = new FinanceExpenseService(prisma as never);
