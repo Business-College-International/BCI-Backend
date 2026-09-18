@@ -22,6 +22,8 @@ describe('AttendanceService access and integrity', () => {
       staff: { findUnique: jest.fn() },
       teacherAssignment: { findFirst: jest.fn() },
       subject: { findUnique: jest.fn() },
+      attendanceSession: { findFirst: jest.fn() },
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'class-1' }]),
     };
     prisma.$transaction.mockImplementation(async (callback: (client: typeof tx) => unknown) => callback(tx));
     tx.term.findUnique.mockResolvedValue({
@@ -41,6 +43,38 @@ describe('AttendanceService access and integrity', () => {
       classId: 'class-1',
       sessionDate: '2026-10-01T08:00:00.000Z',
     }, 'teacher-user-1', [RoleName.TEACHER])).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('rejects a duplicate session for the same class, subject, date, and period', async () => {
+    const prisma = makePrisma();
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'class-1' }]),
+      term: { findUnique: jest.fn().mockResolvedValue({
+        academicYearId: 'year-1',
+        startsAt: new Date('2026-09-01'),
+        endsAt: new Date('2026-12-31'),
+        status: 'OPEN',
+      }) },
+      schoolClass: { findUnique: jest.fn().mockResolvedValue({ academicYearId: 'year-1', level: 'SHS1' }) },
+      staff: { findUnique: jest.fn().mockResolvedValue({ personId: 'teacher-1' }) },
+      teacherAssignment: { findFirst: jest.fn().mockResolvedValue({ id: 'assignment-1' }) },
+      attendanceSession: { findFirst: jest.fn().mockResolvedValue({ id: 'existing-session' }), create: jest.fn() },
+      subject: { findUnique: jest.fn().mockResolvedValue({ id: 'subject-1', level: 'SHS1' }) },
+    };
+    prisma.$transaction.mockImplementation(async (callback: (client: typeof tx) => unknown) => callback(tx));
+
+    const service = new AttendanceService(prisma);
+
+    await expect(service.createSession({
+      termId: 'term-1',
+      classId: 'class-1',
+      subjectId: 'subject-1',
+      sessionDate: '2026-10-01T08:00:00.000Z',
+      periodLabel: 'Period 3',
+    }, 'teacher-user-1', [RoleName.TEACHER])).rejects.toBeInstanceOf(ConflictException);
+
+    expect(tx.$queryRaw).toHaveBeenCalled();
+    expect(tx.attendanceSession.create).not.toHaveBeenCalled();
   });
 
   it('rejects marking a student outside the session class and term', async () => {
