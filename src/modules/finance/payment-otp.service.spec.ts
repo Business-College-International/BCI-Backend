@@ -11,6 +11,7 @@ function makePrisma() {
     person: { findUnique: jest.fn() },
     paymentProviderAttempt: { findFirst: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
     auditLog: { create: jest.fn() },
+    $queryRaw: jest.fn().mockResolvedValue([]),
     $transaction: jest.fn(),
   } as any;
 }
@@ -29,6 +30,40 @@ describe('PaymentOtpService', () => {
 
     await expect(service.submit('student-1', 'payment-1', { otpCode: '123456' }, 'guardian-user', [RoleName.GUARDIAN], ''))
       .rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('locks the payment before evaluating OTP continuation eligibility', async () => {
+    const prisma = makePrisma();
+    prisma.$transaction.mockImplementation(async (callback: (tx: any) => unknown) => callback(prisma));
+    prisma.idempotencyKey.findUnique.mockResolvedValue(null);
+    prisma.payment.findUnique.mockResolvedValue({
+      id: 'payment-1',
+      studentId: 'student-1',
+      guardianId: 'guardian-1',
+      amount: new Prisma.Decimal('50.00'),
+      currency: 'GHS',
+      purpose: 'FEE',
+      status: PaymentStatus.FAILED,
+      provider: 'MOOLRE',
+      providerReference: null,
+      clientReference: 'bci-ref-1',
+    });
+
+    const service = new PaymentOtpService(prisma, makeAdapter());
+
+    await expect(service.submit(
+      'student-1',
+      'payment-1',
+      { otpCode: '123456' },
+      'guardian-user',
+      [RoleName.GUARDIAN],
+      'otp-lock-1',
+    )).rejects.toBeInstanceOf(ConflictException);
+
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(prisma.payment.findUnique).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'payment-1' },
+    }));
   });
 
   it('submits OTP and reuses the persisted payment network when the DTO omits it', async () => {
