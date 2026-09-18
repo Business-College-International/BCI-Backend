@@ -18,6 +18,7 @@ describe('PaymentWebhookProcessor', () => {
     const invoiceUpdate = jest.fn().mockResolvedValue({});
     const prisma = {
       $transaction: jest.fn(async (callback: (tx: any) => unknown) => callback({
+        $executeRaw: jest.fn().mockResolvedValue([]),
         payment: {
           findFirst: jest.fn().mockResolvedValue({
             id: 'payment-1',
@@ -57,6 +58,7 @@ describe('PaymentWebhookProcessor', () => {
     let lookup: unknown;
     const prisma = {
       $transaction: jest.fn(async (callback: (tx: any) => unknown) => callback({
+        $executeRaw: jest.fn().mockResolvedValue([]),
         payment: {
           findFirst: jest.fn().mockImplementation(async ({ where }) => {
             lookup = where;
@@ -83,6 +85,7 @@ describe('PaymentWebhookProcessor', () => {
     const event = { id: 'event-1', processedAt: new Date() };
     const prisma = {
       $transaction: jest.fn(async (callback: (tx: any) => unknown) => callback({
+        $executeRaw: jest.fn().mockResolvedValue([]),
         providerWebhookEvent: { findUnique: jest.fn().mockResolvedValue(event) },
       })),
     };
@@ -178,7 +181,7 @@ describe('PaymentWebhookProcessor', () => {
     };
 
     const processor = new PaymentWebhookProcessor(prisma as any);
-    await expect(processor.apply(normalized, 'event-1'))
+    await expect(processor.apply({ ...normalized, amount: '75.00' }, 'event-1'))
       .resolves.toMatchObject({ applied: true, paymentId: 'payment-1', status: PaymentStatus.SUCCEEDED });
 
     expect(walletUpsert).toHaveBeenCalledWith({
