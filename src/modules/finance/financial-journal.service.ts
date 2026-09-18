@@ -57,11 +57,35 @@ export class FinancialJournalService {
     }
 
     const write = async (tx: Prisma.TransactionClient) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${referenceType + ':' + referenceId}))`;
+
       const existing = await tx.financialJournalEntry.findMany({
         where: { referenceType, referenceId },
         orderBy: { transactionAt: 'asc' },
       });
-      if (existing.length > 0) return existing;
+      if (existing.length > 0) {
+        const expected = parsed
+          .map((line) => ({
+            accountCode: line.accountCode.trim(),
+            direction: line.direction,
+            amount: line.amount.toFixed(2),
+            currency: line.currency,
+          }))
+          .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+        const actual = existing
+          .map((line) => ({
+            accountCode: line.accountCode,
+            direction: line.direction,
+            amount: line.amount.toFixed(2),
+            currency: line.currency,
+          }))
+          .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+
+        if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+          throw new ConflictException('An existing journal transaction uses the same reference with different accounting lines.');
+        }
+        return existing;
+      }
 
       const entryNumber = `JNL-${new Date().getUTCFullYear()}-${randomBytes(6).toString('hex').toUpperCase()}`;
       return Promise.all(
