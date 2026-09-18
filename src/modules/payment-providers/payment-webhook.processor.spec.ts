@@ -185,7 +185,10 @@ describe('PaymentWebhookProcessor', () => {
         },
         paymentProviderAttempt: { update: jest.fn().mockResolvedValue({}) },
         wallet: { upsert: walletUpsert },
-        walletTransaction: { create: walletTransactionCreate },
+        walletTransaction: {
+          findUnique: jest.fn().mockResolvedValue(null),
+          create: walletTransactionCreate,
+        },
         auditLog: { create: auditLogCreate },
         $executeRaw: jest.fn().mockResolvedValue([]),
       })),
@@ -212,6 +215,54 @@ describe('PaymentWebhookProcessor', () => {
       }),
     });
     expect(auditLogCreate).toHaveBeenCalled();
+  });
+
+  it('does not create a second wallet ledger entry for a different successful webhook event', async () => {
+    const walletTransactionFind = jest.fn().mockResolvedValue({
+      id: 'wallet-tx-1',
+      walletId: 'student-1',
+      type: 'TOP_UP',
+      direction: 'CREDIT',
+      amount: new Prisma.Decimal('75.00'),
+      providerReference: 'provider-ref-1',
+    });
+
+    const prisma = {
+      $transaction: jest.fn(async (callback: (tx: any) => unknown) => callback({
+        providerWebhookEvent: {
+          findUnique: jest.fn().mockResolvedValue({ id: 'event-2', processedAt: null }),
+          update: jest.fn().mockResolvedValue({}),
+        },
+        payment: {
+          findFirst: jest.fn().mockResolvedValue({ id: 'payment-1' }),
+          findUnique: jest.fn().mockResolvedValue({
+            id: 'payment-1',
+            amount: new Prisma.Decimal('75.00'),
+            currency: 'GHS',
+            purpose: 'WALLET_TOP_UP',
+            studentId: 'student-1',
+            status: PaymentStatus.SUCCEEDED,
+            attempts: [],
+            allocations: [],
+          }),
+          update: jest.fn().mockResolvedValue({}),
+        },
+        paymentProviderAttempt: { update: jest.fn().mockResolvedValue({}) },
+        wallet: { upsert: jest.fn().mockResolvedValue({ studentId: 'student-1', currency: 'GHS' }) },
+        walletTransaction: {
+          findUnique: walletTransactionFind,
+          create: jest.fn(),
+        },
+        auditLog: { create: jest.fn().mockResolvedValue({}) },
+        $executeRaw: jest.fn().mockResolvedValue([]),
+      })),
+    };
+
+    const processor = new PaymentWebhookProcessor(prisma as any);
+    await expect(processor.apply({ ...normalized, amount: '75.00' }, 'event-2'))
+      .resolves.toMatchObject({ applied: true, paymentId: 'payment-1', status: PaymentStatus.SUCCEEDED });
+
+    expect(walletTransactionFind).toHaveBeenCalledWith({ where: { paymentId: 'payment-1' }, select: expect.any(Object) });
   });
 
 });

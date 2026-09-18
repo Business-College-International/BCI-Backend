@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { InvoiceStatus, PaymentStatus, Prisma } from '@prisma/client';
+import { InvoiceStatus, PaymentStatus, Prisma, WalletTransactionDirection, WalletTransactionType } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
 import { NormalizedPaymentWebhook } from './payment-webhook.normalization';
 
@@ -129,31 +129,57 @@ export class PaymentWebhookProcessor {
             select: { studentId: true, currency: true },
           });
 
-          await tx.walletTransaction.create({
-            data: {
-              walletId: wallet.studentId,
-              type: 'TOP_UP',
-              direction: 'CREDIT',
-              amount: payment.amount,
-              paymentId: payment.id,
-              providerReference: normalized.providerReference,
-              note: 'Verified provider wallet top-up',
+          const existingWalletTransaction = await tx.walletTransaction.findUnique({
+            where: { paymentId: payment.id },
+            select: {
+              id: true,
+              walletId: true,
+              type: true,
+              direction: true,
+              amount: true,
+              providerReference: true,
             },
           });
+
+          let walletTransactionId = existingWalletTransaction?.id ?? null;
+          if (existingWalletTransaction) {
+            if (
+              existingWalletTransaction.walletId !== wallet.studentId ||
+              existingWalletTransaction.type !== WalletTransactionType.TOP_UP ||
+              existingWalletTransaction.direction !== WalletTransactionDirection.CREDIT ||
+              !existingWalletTransaction.amount.eq(payment.amount)
+            ) {
+              throw new Error('Existing wallet ledger entry does not match the verified top-up payment.');
+            }
+          } else {
+            const walletTransaction = await tx.walletTransaction.create({
+              data: {
+                walletId: wallet.studentId,
+                type: WalletTransactionType.TOP_UP,
+                direction: WalletTransactionDirection.CREDIT,
+                amount: payment.amount,
+                paymentId: payment.id,
+                providerReference: normalized.providerReference,
+                note: 'Verified provider wallet top-up',
+              },
+            });
+            walletTransactionId = walletTransaction.id;
+          }
 
           await tx.auditLog.create({
             data: {
               action: 'RECONCILE',
               entityType: 'WalletTransaction',
-              entityId: payment.id,
+              entityId: walletTransactionId!,
               afterJson: {
                 paymentId: payment.id,
                 studentId: payment.studentId,
                 amount: payment.amount.toFixed(2),
                 currency: payment.currency,
                 providerReference: normalized.providerReference,
-                direction: 'CREDIT',
-                type: 'TOP_UP',
+                direction: WalletTransactionDirection.CREDIT,
+                type: WalletTransactionType.TOP_UP,
+                idempotent: Boolean(existingWalletTransaction),
               },
             },
           });
