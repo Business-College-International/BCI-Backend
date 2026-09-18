@@ -110,6 +110,7 @@ describe('AttendanceService access and integrity', () => {
   it('blocks attendance changes after the term is closed', async () => {
     const prisma = makePrisma();
     const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'session-1' }]),
       attendanceSession: { findUnique: jest.fn() },
     };
     prisma.$transaction.mockImplementation(async (callback: (client: typeof tx) => unknown) => callback(tx));
