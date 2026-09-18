@@ -143,4 +143,61 @@ describe('PaymentWebhookProcessor', () => {
       .resolves.toMatchObject({ applied: false, reason: 'terminal-status-protected' });
     expect(errorMessage).toContain('Terminal payment status');
   });
+  it('settles a successful wallet top-up exactly once from the verified payment fact', async () => {
+    const walletUpsert = jest.fn().mockResolvedValue({ studentId: 'student-1', currency: 'GHS' });
+    const walletTransactionCreate = jest.fn().mockResolvedValue({ id: 'wallet-tx-1' });
+    const auditLogCreate = jest.fn().mockResolvedValue({});
+    const paymentFind = jest.fn().mockResolvedValue({
+      id: 'payment-1',
+      amount: new Prisma.Decimal('75.00'),
+      currency: 'GHS',
+      purpose: 'WALLET_TOP_UP',
+      studentId: 'student-1',
+      status: PaymentStatus.PROCESSING,
+      attempts: [{ id: 'attempt-1', provider: 'TEST', providerReference: 'provider-ref-1' }],
+      allocations: [],
+    });
+
+    const prisma = {
+      $transaction: jest.fn(async (callback: (tx: any) => unknown) => callback({
+        providerWebhookEvent: {
+          findUnique: jest.fn().mockResolvedValue({ id: 'event-1', processedAt: null }),
+          update: jest.fn().mockResolvedValue({}),
+        },
+        payment: {
+          findFirst: jest.fn().mockResolvedValue({ id: 'payment-1' }),
+          findUnique: paymentFind,
+          update: jest.fn().mockResolvedValue({}),
+        },
+        paymentProviderAttempt: { update: jest.fn().mockResolvedValue({}) },
+        wallet: { upsert: walletUpsert },
+        walletTransaction: { create: walletTransactionCreate },
+        auditLog: { create: auditLogCreate },
+        $executeRaw: jest.fn().mockResolvedValue([]),
+      })),
+    };
+
+    const processor = new PaymentWebhookProcessor(prisma as any);
+    await expect(processor.apply(normalized, 'event-1'))
+      .resolves.toMatchObject({ applied: true, paymentId: 'payment-1', status: PaymentStatus.SUCCEEDED });
+
+    expect(walletUpsert).toHaveBeenCalledWith({
+      where: { studentId: 'student-1' },
+      update: {},
+      create: { studentId: 'student-1', currency: 'GHS' },
+      select: { studentId: true, currency: true },
+    });
+    expect(walletTransactionCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        walletId: 'student-1',
+        type: 'TOP_UP',
+        direction: 'CREDIT',
+        amount: new Prisma.Decimal('75.00'),
+        paymentId: 'payment-1',
+        providerReference: 'provider-ref-1',
+      }),
+    });
+    expect(auditLogCreate).toHaveBeenCalled();
+  });
+
 });

@@ -38,21 +38,29 @@ export class PaymentWebhookProcessor {
               clientReference: normalized.clientReference!,
             };
 
-      const payment = await tx.payment.findFirst({
+      const paymentCandidate = await tx.payment.findFirst({
         where: paymentWhere,
-        include: {
-          attempts: true,
-          allocations: { select: { invoiceId: true } },
-        },
+        select: { id: true },
       });
 
-      if (!payment) {
+      if (!paymentCandidate) {
         await tx.providerWebhookEvent.update({
           where: { id: event.id },
           data: { processedAt: new Date(), processingError: 'No matching payment record was found.' },
         });
         return { applied: false, reason: 'payment-not-found' as const };
       }
+
+      await tx.$executeRaw`SELECT id FROM "Payment" WHERE id = ${paymentCandidate.id} FOR UPDATE`;
+
+      const payment = await tx.payment.findUnique({
+        where: { id: paymentCandidate.id },
+        include: {
+          attempts: true,
+          allocations: { select: { invoiceId: true } },
+        },
+      });
+      if (!payment) throw new NotFoundException('Payment not found after locking.');
 
       if (normalized.amount !== null && normalized.amount !== payment.amount.toFixed(2)) {
         await tx.providerWebhookEvent.update({
@@ -105,6 +113,52 @@ export class PaymentWebhookProcessor {
       }
 
       if (normalized.paymentStatus === PaymentStatus.SUCCEEDED) {
+        if (payment.purpose === 'WALLET_TOP_UP') {
+          if (!payment.studentId) {
+            await tx.providerWebhookEvent.update({
+              where: { id: event.id },
+              data: { processedAt: new Date(), processingError: 'A wallet top-up payment must reference a student.' },
+            });
+            return { applied: false, reason: 'wallet-student-missing' as const };
+          }
+
+          const wallet = await tx.wallet.upsert({
+            where: { studentId: payment.studentId },
+            update: {},
+            create: { studentId: payment.studentId, currency: payment.currency },
+            select: { studentId: true, currency: true },
+          });
+
+          await tx.walletTransaction.create({
+            data: {
+              walletId: wallet.studentId,
+              type: 'TOP_UP',
+              direction: 'CREDIT',
+              amount: payment.amount,
+              paymentId: payment.id,
+              providerReference: normalized.providerReference,
+              note: 'Verified provider wallet top-up',
+            },
+          });
+
+          await tx.auditLog.create({
+            data: {
+              action: 'RECONCILE',
+              entityType: 'WalletTransaction',
+              entityId: payment.id,
+              afterJson: {
+                paymentId: payment.id,
+                studentId: payment.studentId,
+                amount: payment.amount.toFixed(2),
+                currency: payment.currency,
+                providerReference: normalized.providerReference,
+                direction: 'CREDIT',
+                type: 'TOP_UP',
+              },
+            },
+          });
+        }
+
         const invoiceIds = [...new Set(payment.allocations.map((allocation) => allocation.invoiceId))];
         for (const invoiceId of invoiceIds) {
           const invoice = await tx.studentInvoice.findUnique({
