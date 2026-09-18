@@ -96,13 +96,19 @@ describe('TermLifecycleService', () => {
   });
 
   it('rejects invalid state transitions', async () => {
-    const tx = { term: { findUnique: jest.fn().mockResolvedValue({ id: 'term-1', status: 'CLOSED', academicYearId: 'year-1' }) } };
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'term-1' }]),
+      term: { findUnique: jest.fn().mockResolvedValue({ id: 'term-1', status: 'CLOSED', academicYearId: 'year-1' }) },
+    };
     const service = new TermLifecycleService(makePrisma(tx) as never);
     await expect(service.transitionTerm('term-1', 'OPEN' as any, 'actor-1')).rejects.toBeInstanceOf(ConflictException);
   });
 
   it('rejects term dates outside the academic year', async () => {
-    const tx = { academicYear: { findUnique: jest.fn().mockResolvedValue({ id: 'year-1', startsAt: new Date('2026-09-01'), endsAt: new Date('2027-08-31') }) } };
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'year-1' }]),
+      academicYear: { findUnique: jest.fn().mockResolvedValue({ id: 'year-1', startsAt: new Date('2026-09-01'), endsAt: new Date('2027-08-31') }) },
+    };
     const service = new TermLifecycleService(makePrisma(tx) as never);
     await expect(service.createTerm('year-1', { code: 'T1', name: 'Term 1', startsAt: '2026-08-01', endsAt: '2026-12-01', status: 'DRAFT' } as any, 'actor-1')).rejects.toBeInstanceOf(BadRequestException);
   });
