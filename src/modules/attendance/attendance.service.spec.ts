@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { AttendanceStatus, RoleName } from '@prisma/client';
 import { AttendanceService } from './attendance.service';
 
