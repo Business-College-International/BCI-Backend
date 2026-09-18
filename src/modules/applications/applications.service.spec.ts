@@ -109,6 +109,21 @@ describe('ApplicationsService admission integrity', () => {
 });
 
 describe('ApplicationsService review integrity', () => {
+  it('locks the application before applying a review transition', async () => {
+    const current = makeApplication();
+    const tx = makeTx();
+    tx.$queryRaw.mockResolvedValue([{ id: 'application-1' }]);
+    tx.application.findUnique.mockResolvedValue(current);
+    tx.application.updateMany.mockResolvedValue({ count: 0 });
+    const prisma = makePrisma(tx);
+
+    await expect(new ApplicationsService(prisma as never).review('application-1', 'REJECTED', 'Incomplete documents', 'office-1'))
+      .rejects.toEqual(expect.objectContaining({ message: 'Application changed while it was being reviewed.' }));
+
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+  });
+
+
   it('uses a conditional state transition so a concurrent review cannot overwrite a newer status', async () => {
     const current = makeApplication();
     const tx = makeTx();

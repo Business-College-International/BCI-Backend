@@ -94,6 +94,7 @@ export class ApplicationsService {
     actorUserId: string,
   ) {
     return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Application" WHERE id = ${id} FOR UPDATE`;
       const current = await tx.application.findUnique({ where: { id } });
       if (!current) throw new NotFoundException('Application not found');
       if (!([ApplicationStatus.PENDING, ApplicationStatus.UNDER_REVIEW] as ApplicationStatus[]).includes(current.status)) {

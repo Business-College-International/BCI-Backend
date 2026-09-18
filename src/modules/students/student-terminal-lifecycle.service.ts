@@ -30,6 +30,7 @@ export class StudentTerminalLifecycleService {
     this.requireManagement([roles]);
     try {
       return await this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM "Student" WHERE id = ${studentId} FOR UPDATE`;
         const student = await tx.student.findUnique({ where: { id: studentId }, include: { enrolments: { where: { status: 'ACTIVE' }, orderBy: { enrolledAt: 'desc' }, take: 1, include: { term: true } } } });
         if (!student) throw new NotFoundException('Student not found.');
         if (student.status !== StudentStatus.ACTIVE) throw new ConflictException('Only an active student can graduate.');
@@ -59,6 +60,7 @@ export class StudentTerminalLifecycleService {
     this.requireManagement(roles);
     try {
       return await this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM "Student" WHERE id = ${studentId} FOR UPDATE`;
         const student = await tx.student.findUnique({ where: { id: studentId }, include: { enrolments: { where: { status: 'ACTIVE' }, orderBy: { enrolledAt: 'desc' }, take: 1 } } });
         if (!student) throw new NotFoundException('Student not found.');
         if (student.status !== StudentStatus.ACTIVE) throw new ConflictException('Only an active student can be transferred.');
