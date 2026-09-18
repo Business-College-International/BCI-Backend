@@ -131,7 +131,7 @@ describe('AssessmentsService', () => {
     prisma.guardian.findUnique.mockResolvedValue(null);
     tx.staff.findUnique.mockResolvedValue({ personId: 'staff-1' });
     tx.enrolment.findMany.mockResolvedValue([]);
-    // Historical term is deliberately not represented by an active enrolment.
+    // Historical term must resolve through the requested enrolment scope.
     tx.teacherAssignment.findFirst.mockResolvedValue(null);
 
     const service = new AssessmentsService(prisma);
