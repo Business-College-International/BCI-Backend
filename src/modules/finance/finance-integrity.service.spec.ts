@@ -2,11 +2,16 @@ import { ForbiddenException } from '@nestjs/common';
 import { InvoiceStatus, PaymentStatus, Prisma, RoleName } from '@prisma/client';
 import { FinanceIntegrityService } from './finance-integrity.service';
 
+function decimal(value: string) {
+  return new Prisma.Decimal(value);
+}
+
 function mockPrisma() {
   return {
     studentInvoice: { findMany: jest.fn() },
     payment: { findMany: jest.fn() },
     paymentAllocation: { findMany: jest.fn() },
+    walletTransaction: { findMany: jest.fn() },
   } as any;
 }
 
