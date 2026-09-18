@@ -55,8 +55,8 @@ describe('PaymentOtpService', () => {
       'student-1',
       'payment-1',
       { otpCode: '123456' },
-      'guardian-user',
-      [RoleName.GUARDIAN],
+      'office-user',
+      [RoleName.OFFICE],
       'otp-lock-1',
     )).rejects.toBeInstanceOf(ConflictException);
 
