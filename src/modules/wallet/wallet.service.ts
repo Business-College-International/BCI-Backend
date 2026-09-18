@@ -1,5 +1,5 @@
 import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma, RoleName, WalletTransactionType } from '@prisma/client';
+import { Prisma, RoleName, WalletTransactionDirection, WalletTransactionType } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
 
 const PRIVILEGED_WALLET_ROLES = new Set<RoleName>([
@@ -44,36 +44,44 @@ export class WalletService {
       };
     }
 
-    const [recentTransactions, reversalCount, topUps, withdrawals] = await Promise.all([
+    const [recentTransactions, ledgerTransactions] = await Promise.all([
       this.prisma.walletTransaction.findMany({
         where: { walletId: studentId },
         orderBy: { createdAt: 'desc' },
         take: 100,
       }),
-      this.prisma.walletTransaction.count({
-        where: { walletId: studentId, type: WalletTransactionType.REVERSAL },
-      }),
-      this.prisma.walletTransaction.aggregate({
-        where: { walletId: studentId, type: WalletTransactionType.TOP_UP },
-        _sum: { amount: true },
-      }),
-      this.prisma.walletTransaction.aggregate({
-        where: { walletId: studentId, type: WalletTransactionType.WITHDRAWAL },
-        _sum: { amount: true },
+      this.prisma.walletTransaction.findMany({
+        where: { walletId: studentId },
+        orderBy: { createdAt: 'asc' },
+        select: {
+          id: true,
+          type: true,
+          direction: true,
+          amount: true,
+          reversalOfId: true,
+          paymentId: true,
+        },
       }),
     ]);
 
     const transactions = recentTransactions.map((transaction) => ({
       id: transaction.id,
       type: transaction.type,
+      direction: transaction.direction,
       amount: transaction.amount.toString(),
+      reversalOfId: transaction.reversalOfId,
+      paymentId: transaction.paymentId,
       providerReference: transaction.providerReference,
       processedBy: transaction.processedBy,
       createdAt: transaction.createdAt,
       note: transaction.note,
     }));
 
-    if (reversalCount > 0) {
+    const unresolvedLedgerEntry = ledgerTransactions.find((transaction) =>
+      transaction.direction === null ||
+      (transaction.type === WalletTransactionType.REVERSAL && !transaction.reversalOfId),
+    );
+    if (unresolvedLedgerEntry) {
       return {
         student,
         exists: true,
@@ -84,11 +92,19 @@ export class WalletService {
       };
     }
 
-    const balance = new Prisma.Decimal(topUps._sum.amount ?? 0).minus(withdrawals._sum.amount ?? 0);
+    const balance = ledgerTransactions.reduce((running, transaction) => {
+      if (transaction.direction === WalletTransactionDirection.CREDIT) {
+        return running.plus(transaction.amount);
+      }
+      if (transaction.direction === WalletTransactionDirection.DEBIT) {
+        return running.minus(transaction.amount);
+      }
+      return running;
+    }, new Prisma.Decimal(0));
+
     if (balance.lt(0)) {
       throw new ConflictException('Wallet ledger has a negative balance and requires reconciliation.');
     }
-
     return {
       student,
       exists: true,
