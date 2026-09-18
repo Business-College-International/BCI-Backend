@@ -26,6 +26,7 @@ export class FinanceIntegrityService {
         select: {
           id: true,
           studentId: true,
+          guardianId: true,
           purpose: true,
           status: true,
           amount: true,
@@ -86,16 +87,6 @@ export class FinanceIntegrityService {
           status: true,
           totalAmount: true,
           paymentId: true,
-          payment: {
-            select: {
-              id: true,
-              studentId: true,
-              guardianId: true,
-              amount: true,
-              purpose: true,
-              status: true,
-            },
-          },
         },
         orderBy: { orderedAt: 'asc' },
       }),
@@ -313,7 +304,6 @@ export class FinanceIntegrityService {
       .filter(([, balance]) => balance.lt(0))
       .map(([studentId, balance]) => ({ studentId, balance: balance.toFixed(2) }));
 
-    const successfulStationeryPaymentsById = new Map<string, number>();
     const stationeryOrdersByPayment = new Map<string, typeof stationeryOrders>();
     const successfulStationeryPaymentsWithoutOrder: Array<{
       paymentId: string;
@@ -335,7 +325,8 @@ export class FinanceIntegrityService {
       }
 
       if (['PAID', 'READY_FOR_COLLECTION', 'COLLECTED'].includes(order.status)) {
-        if (!order.payment) {
+        const payment = order.paymentId ? paymentById.get(order.paymentId) : null;
+        if (!payment) {
           invalidStationeryPaymentLinks.push({
             orderId: order.id,
             orderNumber: order.orderNumber,
@@ -343,16 +334,16 @@ export class FinanceIntegrityService {
             reason: 'Fulfillable stationery order has no linked payment.',
           });
         } else if (
-          order.payment.status !== PaymentStatus.SUCCEEDED ||
-          order.payment.purpose !== 'STATIONERY' ||
-          order.payment.studentId !== order.studentId ||
-          order.payment.guardianId !== order.guardianId ||
-          !order.payment.amount.eq(order.totalAmount)
+          payment.status !== PaymentStatus.SUCCEEDED ||
+          payment.purpose !== 'STATIONERY' ||
+          payment.studentId !== order.studentId ||
+          payment.guardianId !== order.guardianId ||
+          !payment.amount.eq(order.totalAmount)
         ) {
           invalidStationeryPaymentLinks.push({
             orderId: order.id,
             orderNumber: order.orderNumber,
-            paymentId: order.payment.id,
+            paymentId: payment.id,
             reason: 'Stationery order does not match the linked successful STATIONERY payment identity or amount.',
           });
         }
@@ -362,7 +353,6 @@ export class FinanceIntegrityService {
     for (const payment of payments) {
       if (payment.purpose !== 'STATIONERY') continue;
       const linkedOrders = stationeryOrdersByPayment.get(payment.id) ?? [];
-      successfulStationeryPaymentsById.set(payment.id, linkedOrders.length);
       if (
         (payment.status === PaymentStatus.SUCCEEDED || payment.status === PaymentStatus.REFUNDED) &&
         linkedOrders.length === 0
