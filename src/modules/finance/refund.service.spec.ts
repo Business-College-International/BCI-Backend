@@ -99,7 +99,7 @@ describe('RefundService', () => {
       [RoleName.ACCOUNTANT],
     );
 
-    expect(prisma.$queryRaw).toHaveBeenCalledWith(expect.anything());
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
   });
 
   it('runs refund reservation under serializable isolation', async () => {
