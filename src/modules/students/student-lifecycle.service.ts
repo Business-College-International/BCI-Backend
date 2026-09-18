@@ -49,7 +49,14 @@ export class StudentLifecycleService {
   }
 
   async progressStudent(studentId: string, actorUserId: string, dto: ProgressStudentDto) {
-    return this.prisma.$transaction(async (tx) => {
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        // Lock the student and destination class before checking enrolment/capacity.
+        // This prevents concurrent progressions from double-promoting a student or
+        // overfilling a capacity-limited class.
+        await tx.$executeRaw`SELECT id FROM "Student" WHERE id = ${studentId} FOR UPDATE`;
+        await tx.$executeRaw`SELECT id FROM "SchoolClass" WHERE id = ${dto.targetClassId} FOR UPDATE`;
+
       const student = await tx.student.findUnique({
         where: { id: studentId },
         include: { enrolments: { where: { status: 'ACTIVE' }, orderBy: { enrolledAt: 'desc' }, take: 1, include: { term: true } } },
@@ -102,6 +109,12 @@ export class StudentLifecycleService {
         },
       });
       return { previousEnrolmentId: current.id, enrolment: created };
-    });
+      });
+    } catch (error) {
+      if ((error as { code?: string }).code === 'P2034') {
+        throw new ConflictException('Student progression changed concurrently. Please retry the operation.');
+      }
+      throw error;
+    }
   }
 }
