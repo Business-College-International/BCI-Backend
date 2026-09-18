@@ -124,6 +124,8 @@ describe('AssessmentsService', () => {
     tx.$queryRaw.mockResolvedValue([{ id: 'term-1' }]);
     tx.staff.findUnique.mockResolvedValue({ personId: 'staff-1' });
     tx.teacherAssignment.findFirst.mockResolvedValue({ id: 'assignment-1' });
+    tx.enrolment.findMany.mockResolvedValue([{ studentId: 'student-1', classId: 'class-assigned' }]);
+    tx.teacherAssignment.findMany.mockResolvedValue([{ classId: 'class-assigned' }]);
 
     const service = new AssessmentsService(makePrisma(tx));
     await expect(service.enterResults('assessment-1', {
