@@ -55,8 +55,6 @@ export class PaymentOtpService {
         return { existing: existingKey.responseJson as Record<string, unknown> };
       }
 
-      await this.assertFinanceAccess(tx, studentId, actorUserId, roles);
-
       const payment = await tx.payment.findUnique({
         where: { id: paymentId },
         select: {
@@ -65,6 +63,7 @@ export class PaymentOtpService {
           guardianId: true,
           amount: true,
           currency: true,
+          purpose: true,
           status: true,
           provider: true,
           providerReference: true,
@@ -73,6 +72,8 @@ export class PaymentOtpService {
       });
       if (!payment || payment.studentId !== studentId) throw new NotFoundException('Payment not found.');
       if (payment.provider !== this.moolre.provider) throw new BadRequestException('OTP continuation is only available for Moolre payments.');
+
+      await this.assertFinanceAccess(tx, studentId, actorUserId, roles, payment.purpose);
       if (payment.status !== PaymentStatus.PENDING && payment.status !== PaymentStatus.PROCESSING) {
         throw new ConflictException('This payment is no longer awaiting OTP submission.');
       }
@@ -284,15 +285,34 @@ export class PaymentOtpService {
     }
   }
 
-  private async assertFinanceAccess(tx: Prisma.TransactionClient, studentId: string, actorUserId: string, roles: RoleName[]) {
+  private async assertFinanceAccess(
+    tx: Prisma.TransactionClient,
+    studentId: string,
+    actorUserId: string,
+    roles: RoleName[],
+    purpose: import('@prisma/client').PaymentPurpose,
+  ) {
     if (roles.some((role) => PRIVILEGED_FINANCE_ROLES.has(role))) return;
-    const guardian = await tx.guardian.findUnique({ where: { userId: actorUserId }, select: { personId: true } });
+
+    const guardian = await tx.guardian.findUnique({
+      where: { userId: actorUserId },
+      select: { personId: true },
+    });
     if (!guardian) throw new ForbiddenException('You do not have permission to submit OTP for this student payment.');
+
     const link = await tx.guardianStudent.findUnique({
       where: { guardianId_studentId: { guardianId: guardian.personId, studentId } },
-      select: { canPayFees: true },
+      select: { canPayFees: true, canManageWallet: true },
     });
-    if (!link?.canPayFees) throw new ForbiddenException('This guardian is not permitted to pay fees for this ward.');
+
+    const allowed = purpose === 'WALLET_TOP_UP' ? link?.canManageWallet : link?.canPayFees;
+    if (!allowed) {
+      throw new ForbiddenException(
+        purpose === 'WALLET_TOP_UP'
+          ? 'This guardian is not permitted to manage this ward wallet.'
+          : 'This guardian is not permitted to pay fees for this ward.',
+      );
+    }
   }
 }
 
