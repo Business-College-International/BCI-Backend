@@ -311,8 +311,12 @@ describe('PaymentWebhookProcessor', () => {
     const processor = new PaymentWebhookProcessor(prisma as any);
     await processor.apply({ ...normalized, amount: '25.00' }, 'event-stationery-lock');
 
-    expect(raw).toHaveBeenCalledWith(expect.anything());
     expect(raw).toHaveBeenCalledTimes(2);
+    const sqlCalls = raw.mock.calls.map(([strings]: [TemplateStringsArray]) => Array.from(strings).join(''));
+    expect(sqlCalls).toEqual(expect.arrayContaining([
+      expect.stringContaining('Payment'),
+      expect.stringContaining('StationeryOrder'),
+    ]));
     expect(orderUpdate).toHaveBeenCalledWith({ where: { id: 'order-lock' }, data: { status: 'PAID' } });
   });
 
