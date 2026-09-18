@@ -210,6 +210,7 @@ export class PaymentWebhookProcessor {
         }
 
         if (payment.purpose === 'STATIONERY') {
+          await tx.$executeRaw`SELECT id FROM "StationeryOrder" WHERE "paymentId" = ${payment.id} FOR UPDATE`;
           const order = await tx.stationeryOrder.findFirst({
             where: { paymentId: payment.id },
             select: { id: true, status: true, totalAmount: true, studentId: true, guardianId: true },
@@ -235,6 +236,7 @@ export class PaymentWebhookProcessor {
         }
         const invoiceIds = [...new Set(payment.allocations.map((allocation) => allocation.invoiceId))];
         for (const invoiceId of invoiceIds) {
+          await tx.$executeRaw`SELECT id FROM "StudentInvoice" WHERE id = ${invoiceId} FOR UPDATE`;
           const invoice = await tx.studentInvoice.findUnique({
             where: { id: invoiceId },
             include: {

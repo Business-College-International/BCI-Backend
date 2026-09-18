@@ -275,6 +275,47 @@ describe('PaymentWebhookProcessor', () => {
 
     expect(walletTransactionFind).toHaveBeenCalledWith({ where: { paymentId: 'payment-1' }, select: expect.any(Object) });
   });
+  it('serializes the stationery order update during verified settlement', async () => {
+    const raw = jest.fn().mockResolvedValue([]);
+    const orderUpdate = jest.fn().mockResolvedValue({});
+    const prisma = {
+      $transaction: jest.fn(async (callback: (tx: any) => unknown) => callback({
+        $executeRaw: raw,
+        providerWebhookEvent: {
+          findUnique: jest.fn().mockResolvedValue({ id: 'event-stationery-lock', processedAt: null }),
+          update: jest.fn().mockResolvedValue({}),
+        },
+        payment: {
+          findFirst: jest.fn().mockResolvedValue({ id: 'payment-stationery-lock' }),
+          findUnique: jest.fn().mockResolvedValue({
+            id: 'payment-stationery-lock', amount: new Prisma.Decimal('25.00'), currency: 'GHS',
+            purpose: 'STATIONERY', studentId: 'student-1', guardianId: 'guardian-1', status: PaymentStatus.PROCESSING,
+            attempts: [], allocations: [],
+          }),
+          update: jest.fn().mockResolvedValue({}),
+        },
+        paymentProviderAttempt: { update: jest.fn().mockResolvedValue({}) },
+        receipt: { upsert: jest.fn().mockResolvedValue({ id: 'receipt-lock', receiptNumber: 'BCI-RCPT-2026-LOCK' }) },
+        auditLog: { create: jest.fn().mockResolvedValue({}) },
+        stationeryOrder: {
+          findFirst: jest.fn().mockResolvedValue({
+            id: 'order-lock', status: 'DRAFT', totalAmount: new Prisma.Decimal('25.00'),
+            studentId: 'student-1', guardianId: 'guardian-1',
+          }),
+          update: orderUpdate,
+        },
+        studentInvoice: { findUnique: jest.fn() },
+      })),
+    };
+
+    const processor = new PaymentWebhookProcessor(prisma as any);
+    await processor.apply({ ...normalized, amount: '25.00' }, 'event-stationery-lock');
+
+    expect(raw).toHaveBeenCalledWith(expect.anything());
+    expect(raw).toHaveBeenCalledTimes(2);
+    expect(orderUpdate).toHaveBeenCalledWith({ where: { id: 'order-lock' }, data: { status: 'PAID' } });
+  });
+
   it('marks the linked stationery order paid after verified settlement', async () => {
     const orderUpdate = jest.fn().mockResolvedValue({});
     const prisma = {
