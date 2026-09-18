@@ -1,9 +1,10 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PayrollPeriodStatus, Prisma, RoleName } from '@prisma/client';
 import { PayrollCalculatorService } from './payroll-calculator.service';
 
 function makeTx() {
   return {
+    $queryRaw: jest.fn().mockResolvedValue([]),
     payrollPeriod: {
       findUnique: jest.fn(),
       update: jest.fn(),
@@ -43,6 +44,8 @@ function makePeriod(status: PayrollPeriodStatus = PayrollPeriodStatus.DRAFT) {
     startsAt: new Date('2026-09-01T00:00:00Z'),
     endsAt: new Date('2026-09-30T23:59:59Z'),
     status,
+    calculatedBy: null,
+    calculatedAt: null,
     approvedBy: null,
     approvedAt: null,
   };
@@ -148,7 +151,7 @@ describe('PayrollCalculatorService approval integrity', () => {
 
   it('approves a consistent calculated payroll period', async () => {
     const tx = makeTx();
-    tx.payrollPeriod.findUnique.mockResolvedValue(makeApprovedPeriod());
+    tx.payrollPeriod.findUnique.mockResolvedValue({ ...makeApprovedPeriod(), calculatedBy: 'calculator-user', calculatedAt: new Date('2026-09-17T15:00:00Z') });
     tx.payrollEntry.findMany.mockResolvedValue([makeEntry()]);
     tx.payrollPeriod.update.mockResolvedValue({
       status: PayrollPeriodStatus.APPROVED,
@@ -164,6 +167,22 @@ describe('PayrollCalculatorService approval integrity', () => {
       where: { periodId: 'period-1' },
       data: { status: 'approved' },
     });
+  });
+
+  it('blocks the payroll calculator from approving the same period', async () => {
+    const tx = makeTx();
+    tx.payrollPeriod.findUnique.mockResolvedValue({
+      ...makeApprovedPeriod(),
+      calculatedBy: 'calculator-user',
+      calculatedAt: new Date('2026-09-17T15:00:00Z'),
+    });
+    tx.payrollEntry.findMany.mockResolvedValue([makeEntry()]);
+
+    const service = new PayrollCalculatorService(makePrisma(tx));
+
+    await expect(service.approve('period-1', 'calculator-user', managerRoles))
+      .rejects.toBeInstanceOf(ForbiddenException);
+    expect(tx.payrollPeriod.update).not.toHaveBeenCalled();
   });
 
   it('blocks approval when net pay does not equal gross pay minus deductions', async () => {

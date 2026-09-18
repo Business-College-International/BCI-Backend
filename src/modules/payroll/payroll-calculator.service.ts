@@ -13,6 +13,7 @@ export class PayrollCalculatorService {
     this.requireManagement(roles);
     try {
       return await this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM "PayrollPeriod" WHERE id = ${periodId} FOR UPDATE`;
         const period = await tx.payrollPeriod.findUnique({ where: { id: periodId } });
         if (!period) throw new NotFoundException('Payroll period not found.');
         if (period.status !== PayrollPeriodStatus.DRAFT) throw new BadRequestException('Only draft payroll periods can be calculated.');
@@ -59,7 +60,17 @@ export class PayrollCalculatorService {
           });
         }
 
-        const updated = await tx.payrollPeriod.update({ where: { id: periodId }, data: { status: PayrollPeriodStatus.CALCULATED } });
+        const calculatedAt = new Date();
+        const updated = await tx.payrollPeriod.update({
+          where: { id: periodId },
+          data: {
+            status: PayrollPeriodStatus.CALCULATED,
+            calculatedBy: actorUserId,
+            calculatedAt,
+            approvedBy: null,
+            approvedAt: null,
+          },
+        });
         await tx.auditLog.create({
           data: { actorUserId, action: 'UPDATE', entityType: 'PayrollPeriod', entityId: periodId, afterJson: { status: updated.status, staffCount: staff.length } },
         });
@@ -81,10 +92,12 @@ export class PayrollCalculatorService {
     this.requireManagement(roles);
     try {
       return await this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM "PayrollPeriod" WHERE id = ${periodId} FOR UPDATE`;
         const period = await tx.payrollPeriod.findUnique({ where: { id: periodId } });
         if (!period) throw new NotFoundException('Payroll period not found.');
         if (period.status !== PayrollPeriodStatus.CALCULATED) throw new BadRequestException('Only calculated payroll periods can be approved.');
-        if (period.approvedBy === actorUserId) throw new ForbiddenException('A payroll approver cannot reuse a previous approval identity.');
+        if (!period.calculatedBy || !period.calculatedAt) throw new BadRequestException('Payroll calculation provenance is incomplete.');
+        if (period.calculatedBy === actorUserId) throw new ForbiddenException('The payroll calculator cannot approve the same payroll period.');
 
         const entries = await tx.payrollEntry.findMany({
           where: { periodId },

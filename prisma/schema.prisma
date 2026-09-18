@@ -460,6 +460,8 @@ model PayrollPeriod {
   startsAt      DateTime
   endsAt        DateTime
   status        PayrollPeriodStatus @default(DRAFT)
+  calculatedBy  String?
+  calculatedAt  DateTime?
   approvedBy    String?
   approvedAt    DateTime?
   paidAt        DateTime?
