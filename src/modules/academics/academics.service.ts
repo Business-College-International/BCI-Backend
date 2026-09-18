@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { RoleName, TermStatus } from '@prisma/client';
+import { Prisma, RoleName, TermStatus } from '@prisma/client';
 import { CreateAcademicYearDto } from './dto/create-academic-year.dto';
 import { CreateClassDto } from './dto/create-class.dto';
 import { CreateTermDto } from './dto/create-term.dto';
@@ -27,7 +27,10 @@ export class AcademicsService {
     if (endsAt <= startsAt) throw new BadRequestException('Academic year end must be after its start.');
 
     return this.prisma.$transaction(async (tx) => {
-      if (dto.isCurrent) await tx.academicYear.updateMany({ data: { isCurrent: false } });
+      if (dto.isCurrent) {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('academic-year-current'))`;
+        await tx.academicYear.updateMany({ data: { isCurrent: false } });
+      }
       const year = await tx.academicYear.create({
         data: { name: dto.name.trim(), startsAt, endsAt, isCurrent: dto.isCurrent ?? false },
       });
@@ -46,6 +49,7 @@ export class AcademicsService {
 
   async setCurrentAcademicYear(id: string, actorUserId: string) {
     return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('academic-year-current'))`;
       const year = await tx.academicYear.findUnique({ where: { id } });
       if (!year) throw new NotFoundException('Academic year not found.');
       await tx.academicYear.updateMany({ data: { isCurrent: false } });
@@ -203,6 +207,7 @@ export class AcademicsService {
 
   async updateClass(id: string, dto: UpdateClassDto, actorUserId: string) {
     return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT id FROM "SchoolClass" WHERE id = ${id} FOR UPDATE`;
       const current = await tx.schoolClass.findUnique({ where: { id } });
       if (!current) throw new NotFoundException('Class not found.');
 
