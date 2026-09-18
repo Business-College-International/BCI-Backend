@@ -4,6 +4,7 @@ import { StationeryService } from './stationery.service';
 
 function makeTx(): any {
   return {
+    $queryRaw: jest.fn().mockResolvedValue([]),
     stationeryItem: { create: jest.fn(), findUnique: jest.fn(), update: jest.fn(), findMany: jest.fn() },
     stockMovement: { create: jest.fn() },
     auditLog: { create: jest.fn() },
@@ -54,6 +55,20 @@ describe('StationeryService', () => {
     const service = new StationeryService(prisma as never, {} as never);
     await expect(service.initiatePayment('order-1', {}, 'guardian-user', [RoleName.GUARDIAN], ''))
       .rejects.toBeInstanceOf(require('@nestjs/common').ConflictException);
+  });
+
+  it('locks the stationery order before reserving its payment', async () => {
+    const tx = makeTx();
+    tx.idempotencyKey.findUnique.mockResolvedValue(null);
+    tx.guardian.findUnique.mockResolvedValue({ personId: 'guardian-1' });
+    tx.stationeryOrder.findUnique.mockResolvedValue(null);
+    const prisma = { $transaction: jest.fn(async (callback: (value: typeof tx) => unknown) => callback(tx)) };
+    const service = new StationeryService(prisma as never, {} as never);
+
+    await expect(service.initiatePayment('order-1', {}, 'guardian-user', [RoleName.GUARDIAN], 'lock-key'))
+      .rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
   });
 
   it('reserves the stationery payment before provider initiation', async () => {

@@ -84,6 +84,7 @@ export class StationeryService {
     let reservation: any;
     try {
       reservation = await this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM "StationeryOrder" WHERE id = ${orderId} FOR UPDATE`;
         const existingKey = await tx.idempotencyKey.findUnique({
           where: { userId_key_operation: { userId: actorUserId, key: normalizedKey, operation: 'stationery.payment' } },
         });
