@@ -26,6 +26,7 @@ describe('WalletService ledger balance', () => {
     const prisma = makePrisma();
     prisma.student.findUnique.mockResolvedValue(student);
     prisma.guardian.findUnique.mockResolvedValue({ personId: 'guardian-1' });
+    prisma.guardianStudent.findUnique.mockResolvedValue({ canManageWallet: true });
     prisma.wallet.findUnique.mockResolvedValue({ studentId: 'student-1', currency: 'GHS' });
     prisma.walletTransaction.findMany
       .mockResolvedValueOnce([
@@ -71,6 +72,7 @@ describe('WalletService ledger balance', () => {
     const prisma = makePrisma();
     prisma.student.findUnique.mockResolvedValue(student);
     prisma.guardian.findUnique.mockResolvedValue({ personId: 'guardian-1' });
+    prisma.guardianStudent.findUnique.mockResolvedValue({ canManageWallet: false });
     prisma.wallet.findUnique.mockResolvedValue({ studentId: 'student-1', currency: 'GHS' });
 
     await expect(
