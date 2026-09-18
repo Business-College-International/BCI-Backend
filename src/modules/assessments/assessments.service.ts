@@ -21,6 +21,7 @@ export class AssessmentsService {
 
   async createAssessment(dto: CreateAssessmentDto, actorUserId: string, roles: RoleName[]) {
     return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Term" WHERE id = ${dto.termId} FOR UPDATE`;
       const [term, subject] = await Promise.all([
         tx.term.findUnique({ where: { id: dto.termId } }),
         tx.subject.findUnique({ where: { id: dto.subjectId } }),
@@ -112,6 +113,14 @@ export class AssessmentsService {
 
   async enterResults(assessmentId: string, dto: EnterAssessmentResultsDto, actorUserId: string, roles: RoleName[]) {
     return this.prisma.$transaction(async (tx) => {
+      const assessmentTerm = await tx.assessment.findUnique({
+        where: { id: assessmentId },
+        select: { termId: true },
+      });
+      if (!assessmentTerm) throw new NotFoundException('Assessment not found.');
+
+      await tx.$queryRaw`SELECT id FROM "Term" WHERE id = ${assessmentTerm.termId} FOR UPDATE`;
+
       const assessment = await tx.assessment.findUnique({
         where: { id: assessmentId },
         select: { id: true, termId: true, subjectId: true, maxScore: true, term: { select: { status: true } } },
