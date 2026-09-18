@@ -62,7 +62,11 @@ describe('StaffManagementService', () => {
   it('completes an active duty and audits the transition', async () => {
     const duty = { id: 'duty-1', active: true };
     const tx = {
-      staffDuty: { update: jest.fn().mockResolvedValue({ ...duty, active: false }) },
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'duty-1' }]),
+      staffDuty: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        findUnique: jest.fn().mockResolvedValue({ ...duty, active: false }),
+      },
       auditLog: { create: jest.fn().mockResolvedValue({ id: 'audit-1' }) },
     };
     const prisma = {
@@ -75,6 +79,31 @@ describe('StaffManagementService', () => {
     expect(tx.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ entityType: 'StaffDuty', entityId: 'duty-1' }),
     }));
+  });
+
+  it('locks and conditionally deactivates a duty exactly once', async () => {
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'duty-2' }]),
+      staffDuty: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        findUnique: jest.fn().mockResolvedValue({ id: 'duty-2', active: false }),
+      },
+      auditLog: { create: jest.fn().mockResolvedValue({}) },
+    };
+    const prisma = {
+      staffDuty: { findUnique: jest.fn().mockResolvedValue({ id: 'duty-2', active: true }) },
+      $transaction: jest.fn(async (callback: (arg: typeof tx) => unknown) => callback(tx)),
+    };
+    const service = new StaffManagementService(prisma as never);
+
+    await service.completeDuty('duty-2', 'actor-1');
+
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(tx.staffDuty.updateMany).toHaveBeenCalledWith({
+      where: { id: 'duty-2', active: true },
+      data: { active: false },
+    });
+    expect(tx.staffDuty.findUnique).toHaveBeenCalledWith({ where: { id: 'duty-2' } });
   });
 
   it('rejects completing an already inactive duty', async () => {

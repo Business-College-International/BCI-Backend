@@ -103,7 +103,16 @@ export class StaffManagementService {
     if (!duty.active) throw new BadRequestException('Duty is already inactive.');
 
     const updated = await this.prisma.$transaction(async (tx) => {
-      const result = await tx.staffDuty.update({ where: { id: dutyId }, data: { active: false } });
+      await tx.$queryRaw`SELECT id FROM "StaffDuty" WHERE id = ${dutyId} FOR UPDATE`;
+      const result = await tx.staffDuty.updateMany({
+        where: { id: dutyId, active: true },
+        data: { active: false },
+      });
+      if (result.count !== 1) {
+        throw new BadRequestException('Duty is already inactive.');
+      }
+
+      const updatedDuty = await tx.staffDuty.findUnique({ where: { id: dutyId } });
       await tx.auditLog.create({
         data: {
           actorUserId,
@@ -114,7 +123,7 @@ export class StaffManagementService {
           afterJson: { active: false },
         },
       });
-      return result;
+      return updatedDuty;
     });
     return updated;
   }
