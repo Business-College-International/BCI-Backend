@@ -37,7 +37,7 @@ describe('NotificationOperationsService', () => {
           update,
         },
         auditLog: { create: jest.fn().mockResolvedValue({}) },
-      }),
+      })),
     };
     const service = new NotificationOperationsService(prisma as any);
 
