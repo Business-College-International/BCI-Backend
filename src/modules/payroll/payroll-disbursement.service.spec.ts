@@ -1,11 +1,11 @@
-import { ConflictException, ForbiddenException } from '@nestjs/common';
+import { ForbiddenException } from '@nestjs/common';
 import { DisbursementStatus, PayrollPeriodStatus, Prisma, RoleName } from '@prisma/client';
 import { PayrollDisbursementService } from './payroll-disbursement.service';
 
 function makeTx() {
   return {
     $queryRaw: jest.fn().mockResolvedValue([]),
-    payrollEntry: { findUnique: jest.fn(), findMany: jest.fn() },
+    payrollEntry: { findUnique: jest.fn(), findMany: jest.fn(), updateMany: jest.fn() },
     payrollPeriod: { findUnique: jest.fn(), updateMany: jest.fn() },
     disbursementAttempt: { create: jest.fn(), findUnique: jest.fn(), updateMany: jest.fn() },
     auditLog: { create: jest.fn() },
