@@ -188,7 +188,7 @@ describe('WalletOperationsService', () => {
       studentId: 'student-1',
       currency: 'GHS',
       transactions: [
-        { id: 'top-up', type: WalletTransactionType.TOP_UP, direction: WalletTransactionDirection.CREDIT, amount: new Prisma.Decimal('100'), reversalOfId: null, paymentId: 'payment-1' },
+        { id: 'top-up', type: WalletTransactionType.TOP_UP, direction: WalletTransactionDirection.CREDIT, amount: new Prisma.Decimal('100'), reversalOfId: null, paymentId: 'payment-1', withdrawalId: null },
       ],
     });
     tx.walletTransaction.create.mockResolvedValue({
@@ -211,11 +211,43 @@ describe('WalletOperationsService', () => {
       reversalOfId: 'top-up',
       direction: WalletTransactionDirection.DEBIT,
       balance: '0.00',
-      withdrawalId: 'withdrawal-1',
+    });
+  });
+
+  it('marks linked withdrawal evidence reversed when a withdrawal is reversed', async () => {
+    tx.wallet.findUnique.mockResolvedValue({
+      studentId: 'student-1',
+      currency: 'GHS',
+      transactions: [
+        { id: 'top-up', type: WalletTransactionType.TOP_UP, direction: WalletTransactionDirection.CREDIT, amount: new Prisma.Decimal('100'), reversalOfId: null, paymentId: 'payment-1', withdrawalId: null },
+        { id: 'withdrawal-1', type: WalletTransactionType.WITHDRAWAL, direction: WalletTransactionDirection.DEBIT, amount: new Prisma.Decimal('40'), reversalOfId: null, paymentId: null, withdrawalId: 'withdrawal-evidence-1' },
+      ],
+    });
+    tx.walletTransaction.create.mockResolvedValue({
+      id: 'reversal-withdrawal-1',
+      amount: new Prisma.Decimal('40'),
+    });
+    tx.walletWithdrawal.update.mockResolvedValue({});
+
+    await expect(
+      new WalletOperationsService(prisma).reverse(
+        'student-1',
+        'withdrawal-1',
+        { reason: 'Cash dispense was voided.' },
+        'user-1',
+        [RoleName.ACCOUNTANT],
+        'reversal-withdrawal-key-1',
+      ),
+    ).resolves.toMatchObject({
+      transactionId: 'reversal-withdrawal-1',
+      reversalOfId: 'withdrawal-1',
+      direction: WalletTransactionDirection.CREDIT,
+      withdrawalId: 'withdrawal-evidence-1',
+      balance: '100.00',
     });
 
     expect(tx.walletWithdrawal.update).toHaveBeenCalledWith({
-      where: { id: 'withdrawal-1' },
+      where: { id: 'withdrawal-evidence-1' },
       data: expect.objectContaining({
         status: 'REVERSED',
         reversedBy: 'user-1',
