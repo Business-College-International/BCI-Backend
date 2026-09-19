@@ -46,7 +46,37 @@ export class ReportReadinessService {
     if (term.status !== TermStatus.CLOSED) baseReasons.push('TERM_NOT_CLOSED');
     if (assessments.length === 0) baseReasons.push('NO_ASSESSMENTS');
     if (weightedCount > 0 && unweightedCount > 0) baseReasons.push('MIXED_WEIGHT_POLICY');
-    baseReasons.push('GRADING_POLICY_REQUIRED');
+
+    const gradingPolicy = schoolClass.programme === 'NONE'
+      ? await this.prisma.gradingPolicy.findFirst({
+          where: {
+            academicYearId: term.academicYearId,
+            level: schoolClass.level,
+            programme: null,
+            status: 'ACTIVE',
+          },
+          select: { id: true, version: true },
+        })
+      : await this.prisma.gradingPolicy.findFirst({
+          where: {
+            academicYearId: term.academicYearId,
+            level: schoolClass.level,
+            programme: schoolClass.programme,
+            status: 'ACTIVE',
+          },
+          select: { id: true, version: true },
+        }) ??
+        await this.prisma.gradingPolicy.findFirst({
+          where: {
+            academicYearId: term.academicYearId,
+            level: schoolClass.level,
+            programme: null,
+            status: 'ACTIVE',
+          },
+          select: { id: true, version: true },
+        });
+
+    if (!gradingPolicy) baseReasons.push('GRADING_POLICY_REQUIRED');
 
     const students = enrolments.map((enrolment) => {
       const missingAssessments = assessments.filter((assessment) => !resultKeys.has(`${enrolment.studentId}:${assessment.id}`)).map((assessment) => ({
@@ -70,8 +100,10 @@ export class ReportReadinessService {
       class: schoolClass,
       term,
       policy: {
-        gradingConfigured: false,
-        reason: 'Persistent school grading-band policy is not yet configured.',
+        gradingConfigured: Boolean(gradingPolicy),
+        policyVersionId: gradingPolicy?.id ?? null,
+        policyVersion: gradingPolicy?.version ?? null,
+        reason: gradingPolicy ? null : 'No active grading policy is configured for this class scope.',
       },
       totals: {
         activeStudents: enrolments.length,
