@@ -1,5 +1,5 @@
 import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma, ReportCardPublicationStatus, RoleName } from '@prisma/client';
+import { ReportCardPublicationStatus, RoleName } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { PrismaService } from '../../prisma.service';
 import { AcademicReportsService } from './academic-reports.service';
@@ -101,6 +101,28 @@ export class ReportCardPublicationService {
         const publication = await tx.reportCardPublication.findUnique({ where: { id } });
         if (!publication) throw new NotFoundException('Report-card publication not found.');
         assertPublicationTransition(publication.status as any, ReportCardPublicationStatus.PUBLISHED);
+
+        const report = await this.reports.getStudentTermSummary(
+          publication.studentId,
+          publication.termId,
+          actorUserId,
+          roles,
+        );
+        const currentSnapshot = {
+          schemaVersion: 1,
+          student: report.student,
+          term: report.term,
+          placement: report.placement,
+          calculation: report.calculation,
+          subjects: report.subjects,
+          assessments: report.assessments,
+          attendance: report.attendance,
+          grading: report.grading,
+        };
+        const currentHash = createHash('sha256').update(JSON.stringify(currentSnapshot)).digest('hex');
+        if (currentHash !== publication.snapshotHash) {
+          throw new ConflictException('The prepared report snapshot is stale. Re-prepare the publication after reconciling the underlying academic record.');
+        }
 
         const existing = await tx.reportCardPublication.findFirst({
           where: { studentId: publication.studentId, termId: publication.termId, status: ReportCardPublicationStatus.PUBLISHED, id: { not: id } },
