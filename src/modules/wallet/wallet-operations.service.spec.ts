@@ -91,7 +91,7 @@ describe('WalletOperationsService', () => {
       studentId: 'student-1',
       currency: 'GHS',
       transactions: [
-        { id: 'top-up', type: WalletTransactionType.TOP_UP, direction: WalletTransactionDirection.CREDIT, amount: new Prisma.Decimal('100'), reversalOfId: null, paymentId: 'payment-1', withdrawalId: null },
+        { id: 'top-up', type: WalletTransactionType.TOP_UP, direction: WalletTransactionDirection.CREDIT, amount: new Prisma.Decimal('100'), reversalOfId: null, paymentId: 'payment-1', withdrawalId: 'withdrawal-1' },
       ],
     });
 
@@ -211,6 +211,16 @@ describe('WalletOperationsService', () => {
       reversalOfId: 'top-up',
       direction: WalletTransactionDirection.DEBIT,
       balance: '0.00',
+      withdrawalId: 'withdrawal-1',
+    });
+
+    expect(tx.walletWithdrawal.update).toHaveBeenCalledWith({
+      where: { id: 'withdrawal-1' },
+      data: expect.objectContaining({
+        status: 'REVERSED',
+        reversedBy: 'user-1',
+        reversedAt: expect.any(Date),
+      }),
     });
   });
 

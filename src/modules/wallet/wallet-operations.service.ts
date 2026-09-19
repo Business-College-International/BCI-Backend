@@ -148,11 +148,16 @@ export class WalletOperationsService {
         await tx.auditLog.create({
           data: {
             actorUserId,
-            action: 'RECONCILE',
+            action: 'DISBURSE',
             entityType: 'Wallet',
             entityId: studentId,
             beforeJson: { balance: balance.toFixed(2) },
-            afterJson: { balance: balance.minus(amount).toFixed(2), transactionId: transaction.id, type: 'WITHDRAWAL' },
+            afterJson: {
+              balance: balance.minus(amount).toFixed(2),
+              transactionId: transaction.id,
+              withdrawalId: withdrawal.id,
+              type: 'WITHDRAWAL',
+            },
           },
         });
 
@@ -245,7 +250,15 @@ export class WalletOperationsService {
           include: {
             transactions: {
               orderBy: { createdAt: 'asc' },
-              select: { id: true, type: true, direction: true, amount: true, reversalOfId: true, paymentId: true },
+              select: {
+                id: true,
+                type: true,
+                direction: true,
+                amount: true,
+                reversalOfId: true,
+                paymentId: true,
+                withdrawalId: true,
+              },
             },
           },
         });
@@ -320,6 +333,7 @@ export class WalletOperationsService {
           direction: reversalDirection,
           balance: nextBalance.toFixed(2),
           status: 'COMPLETED',
+          ...(original.withdrawalId ? { withdrawalId: original.withdrawalId } : {}),
         };
 
         await tx.auditLog.create({
