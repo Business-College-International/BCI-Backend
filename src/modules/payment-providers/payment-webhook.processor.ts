@@ -1,3 +1,62 @@
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { randomBytes } from 'node:crypto';
+import { InvoiceStatus, PaymentStatus, Prisma, WalletTransactionDirection, WalletTransactionType } from '@prisma/client';
+import { PrismaService } from '../../prisma.service';
+import { NormalizedPaymentWebhook } from './payment-webhook.normalization';
+
+const TERMINAL_STATUSES = new Set<PaymentStatus>([
+  PaymentStatus.SUCCEEDED,
+  PaymentStatus.FAILED,
+  PaymentStatus.CANCELLED,
+  PaymentStatus.REFUNDED,
+]);
+
+@Injectable()
+export class PaymentWebhookProcessor {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async apply(normalized: NormalizedPaymentWebhook, eventId: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const event = await tx.providerWebhookEvent.findUnique({
+        where: { provider_eventId: { provider: normalized.provider, eventId } },
+      });
+      if (!event) throw new NotFoundException('Provider webhook event was not recorded.');
+      if (event.processedAt) return { applied: false, reason: 'duplicate-event' as const };
+
+      const paymentWhere = normalized.providerReference && normalized.clientReference
+        ? {
+            provider: normalized.provider,
+            providerReference: normalized.providerReference,
+            clientReference: normalized.clientReference,
+          }
+        : normalized.providerReference
+          ? {
+              provider: normalized.provider,
+              providerReference: normalized.providerReference,
+            }
+          : {
+              provider: normalized.provider,
+              clientReference: normalized.clientReference!,
+            };
+
+      const paymentCandidate = await tx.payment.findFirst({
+        where: paymentWhere,
+        select: { id: true },
+      });
+
+      if (!paymentCandidate) {
+        await tx.providerWebhookEvent.update({
+          where: { id: event.id },
+          data: { processedAt: new Date(), processingError: 'No matching payment record was found.' },
+        });
+        return { applied: false, reason: 'payment-not-found' as const };
+      }
+
+      await tx.$executeRaw`SELECT id FROM "Payment" WHERE id = ${paymentCandidate.id} FOR UPDATE`;
+
+      const payment = await tx.payment.findUnique({
+        where: { id: paymentCandidate.id },
+        include: {
           attempts: true,
           allocations: { select: { invoiceId: true } },
           paymentIntents: { select: { id: true, invoiceId: true, amount: true, status: true, expiresAt: true } },
@@ -197,14 +256,13 @@
         }
         if (payment.purpose === 'FEE') {
           const intentTotal = payment.paymentIntents.reduce((sum, intent) => sum.plus(intent.amount), new Prisma.Decimal(0));
-          if (!intentTotal.eq(payment.amount) || payment.paymentIntents.length === 0) {
+          if (payment.paymentIntents.length === 0 || !intentTotal.eq(payment.amount)) {
             await tx.providerWebhookEvent.update({
               where: { id: event.id },
               data: { processedAt: new Date(), processingError: 'Verified fee payment does not match its payment-intent reservation total.' },
             });
             return { applied: false, reason: 'payment-intent-total-mismatch' as const };
           }
-
           for (const intent of payment.paymentIntents) {
             await tx.paymentAllocation.upsert({
               where: { paymentId_invoiceId: { paymentId: payment.id, invoiceId: intent.invoiceId } },
@@ -213,7 +271,6 @@
             });
           }
         }
-
         const invoiceIds = [...new Set(payment.paymentIntents.map((intent) => intent.invoiceId))];
         for (const invoiceId of invoiceIds) {
           await tx.$executeRaw`SELECT id FROM "StudentInvoice" WHERE id = ${invoiceId} FOR UPDATE`;

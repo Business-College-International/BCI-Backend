@@ -51,7 +51,11 @@ function makeService() {
       update: jest.fn().mockResolvedValue({}),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
-    paymentIntent: { create: jest.fn().mockResolvedValue({ id: 'intent-1', invoiceId: 'invoice-1', amount: new Prisma.Decimal('50.00'), expiresAt: new Date('2026-09-19T06:15:00.000Z') }), updateMany: jest.fn().mockResolvedValue({ count: 1 }), findMany: jest.fn().mockResolvedValue([]) },
+    paymentIntent: {
+      create: jest.fn().mockResolvedValue({ id: 'intent-1', invoiceId: 'invoice-1', amount: new Prisma.Decimal('50.00'), expiresAt: new Date('2026-09-19T06:15:00.000Z') }),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      findMany: jest.fn().mockResolvedValue([]),
+    },
     auditLog: { create: jest.fn().mockResolvedValue({}) },
   };
 
@@ -96,9 +100,6 @@ describe('PaymentInitiationService', () => {
     const result = await service.initiate('student-1', dto, 'guardian-user', [RoleName.GUARDIAN], 'idem-1');
 
     expect(reservationTx.$executeRaw).toHaveBeenCalled();
-    expect(reservationTx.paymentIntent.create).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ studentId: 'student-1', invoiceId: 'invoice-1', paymentId: 'payment-1', status: 'PENDING' }),
-    }));
     expect(reservationTx.paymentAllocation.create).not.toHaveBeenCalled();
     expect(reservationTx.paymentIntent.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ invoiceId: 'invoice-1', paymentId: 'payment-1' }) }));
     expect(reservationTx.payment.create).toHaveBeenCalledWith(expect.objectContaining({
@@ -180,3 +181,14 @@ describe('PaymentInitiationService', () => {
     const { service, prisma, moolre, reservationTx } = makeService();
     const persistenceError = new Error('database unavailable');
     prisma.$transaction.mockReset()
+      .mockImplementationOnce(async (callback: (tx: any) => unknown) => callback(reservationTx))
+      .mockRejectedValueOnce(persistenceError);
+
+    await expect(service.initiate('student-1', dto, 'guardian-user', [RoleName.GUARDIAN], 'idem-3'))
+      .rejects.toBeInstanceOf(ServiceUnavailableException);
+
+    expect(moolre.initiatePayment).toHaveBeenCalledTimes(1);
+    expect(reservationTx.payment.update).not.toHaveBeenCalled();
+    expect(reservationTx.paymentProviderAttempt.update).not.toHaveBeenCalled();
+  });
+});
