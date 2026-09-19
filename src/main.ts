@@ -5,7 +5,8 @@ import type { NextFunction, Request, Response } from 'express';
 import { AppModule } from './app.module';
 import { getCorsOrigins, validateEnvironment } from './config/environment';
 import { requestLoggingMiddleware } from './common/logging/request-logging.middleware';
-import { rateLimitMiddleware } from './common/security/rate-limit.middleware';
+import { createRateLimitMiddleware, PrismaRateLimitStore } from './common/security/rate-limit.middleware';
+import { PrismaService } from './prisma.service';
 
 async function bootstrap(): Promise<void> {
   validateEnvironment();
@@ -18,7 +19,10 @@ async function bootstrap(): Promise<void> {
     response.setHeader('X-Request-Id', randomUUID());
     next();
   });
-  app.use(rateLimitMiddleware);
+  const rateLimiter = createRateLimitMiddleware(new PrismaRateLimitStore(app.get(PrismaService)));
+  app.use((request: Request, response: Response, next: NextFunction) => {
+    void rateLimiter(request, response, next);
+  });
   app.use(requestLoggingMiddleware);
   app.useGlobalPipes(
     new ValidationPipe({
