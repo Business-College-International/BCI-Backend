@@ -40,6 +40,16 @@ export class ReportCardPublicationController {
     return this.publications.void(id, request.user.id, request.user.roles, body.reason ?? '');
   }
 
+  @Get('students/:studentId/terms/:termId/publications/history')
+  @RequirePermissions(PERMISSIONS.REPORTS_PUBLISH)
+  history(
+    @Param('studentId', new ParseUUIDPipe()) studentId: string,
+    @Param('termId', new ParseUUIDPipe()) termId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.publications.history(studentId, termId, request.user.roles);
+  }
+
   @Get('students/:studentId/terms/:termId/publications/current')
   @RequirePermissions(PERMISSIONS.REPORTS_READ)
   current(

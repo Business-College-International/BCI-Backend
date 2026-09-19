@@ -57,6 +57,43 @@ describe('ReportCardPublicationService', () => {
     }));
   });
 
+  it('returns immutable publication history for authorized leadership', async () => {
+    const { prisma } = makePrisma();
+    prisma.student = { findUnique: jest.fn().mockResolvedValue({ id: 'student-1' }) };
+    prisma.term = { findUnique: jest.fn().mockResolvedValue({ id: 'term-1' }) };
+    prisma.reportCardPublication.findMany = jest.fn().mockResolvedValue([
+      { id: 'pub-2', publicationVersion: 2, status: ReportCardPublicationStatus.VOIDED },
+      { id: 'pub-1', publicationVersion: 1, status: ReportCardPublicationStatus.PUBLISHED },
+    ]);
+
+    const reports = { getStudentTermSummary: jest.fn() };
+    const readiness = { getClassReadiness: jest.fn() };
+    const service = new ReportCardPublicationService(prisma as never, reports as never, readiness as never);
+
+    const history = await service.history('student-1', 'term-1', ['PRINCIPAL'] as never);
+
+    expect(history).toHaveLength(2);
+    expect(history[0].publicationVersion).toBe(2);
+    expect(prisma.reportCardPublication.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { studentId: 'student-1', termId: 'term-1' },
+      orderBy: { publicationVersion: 'desc' },
+    }));
+  });
+
+  it('rejects publication history access for teachers and guardians', async () => {
+    const { prisma } = makePrisma();
+    prisma.student = { findUnique: jest.fn() };
+    prisma.term = { findUnique: jest.fn() };
+    prisma.reportCardPublication.findMany = jest.fn();
+
+    const reports = { getStudentTermSummary: jest.fn() };
+    const readiness = { getClassReadiness: jest.fn() };
+    const service = new ReportCardPublicationService(prisma as never, reports as never, readiness as never);
+
+    await expect(service.history('student-1', 'term-1', ['TEACHER'] as never)).rejects.toBeInstanceOf(Error);
+    expect(prisma.reportCardPublication.findMany).not.toHaveBeenCalled();
+  });
+
   it('requires a reason when voiding', async () => {
     const { prisma } = makePrisma();
     const reports = { getStudentTermSummary: jest.fn() };

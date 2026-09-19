@@ -165,6 +165,23 @@ export class ReportCardPublicationService {
     });
   }
 
+  async history(studentId: string, termId: string, roles: RoleName[]) {
+    this.assertPublishRole(roles);
+
+    const [student, term, publications] = await Promise.all([
+      this.prisma.student.findUnique({ where: { id: studentId }, select: { id: true } }),
+      this.prisma.term.findUnique({ where: { id: termId }, select: { id: true } }),
+      this.prisma.reportCardPublication.findMany({
+        where: { studentId, termId },
+        orderBy: { publicationVersion: 'desc' },
+      }),
+    ]);
+
+    if (!student || !term) throw new NotFoundException('Student or term not found.');
+
+    return publications;
+  }
+
   async current(studentId: string, termId: string, actorUserId: string, roles: RoleName[]) {
     await this.reports.getStudentTermSummary(studentId, termId, actorUserId, roles);
     const current = await this.prisma.reportCardPublication.findFirst({
