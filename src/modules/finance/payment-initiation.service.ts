@@ -263,11 +263,25 @@ export class PaymentInitiationService {
         if (invoices.length !== dto.invoiceIds.length) {
           throw new ConflictException('One or more selected invoices are unavailable for payment.');
         }
+        const reservationNow = new Date();
+        await tx.paymentIntent.updateMany({
+          where: {
+            invoiceId: { in: invoices.map((invoice) => invoice.id) },
+            status: { in: ['PENDING', 'PROCESSING'] },
+            expiresAt: { lte: reservationNow },
+          },
+          data: {
+            status: 'EXPIRED',
+            completedAt: reservationNow,
+            failureCode: 'RESERVATION_EXPIRED',
+            failureMessage: 'Payment intent reservation expired before settlement.',
+          },
+        });
         const activeIntents = await tx.paymentIntent.findMany({
           where: {
             invoiceId: { in: invoices.map((invoice) => invoice.id) },
             status: { in: ['PENDING', 'PROCESSING'] },
-            expiresAt: { gt: new Date() },
+            expiresAt: { gt: reservationNow },
           },
           select: { invoiceId: true, amount: true },
         });
