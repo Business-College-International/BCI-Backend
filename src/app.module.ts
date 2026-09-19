@@ -20,6 +20,7 @@ import { StudentRecordsModule } from './modules/student-records/student-records.
 import { StudentsModule } from './modules/students/students.module';
 import { TimetableModule } from './modules/timetable/timetable.module';
 import { WalletModule } from './modules/wallet/wallet.module';
+import { PrismaService } from './prisma.service';
 
 @Controller('health')
 class HealthController {
@@ -54,5 +55,6 @@ class HealthController {
     WalletModule,
   ],
   controllers: [HealthController],
+  providers: [PrismaService],
 })
 export class AppModule {}

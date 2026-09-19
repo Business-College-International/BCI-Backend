@@ -180,6 +180,15 @@ enum AuditAction {
   DISBURSE
   RECONCILE
 }
+model RateLimitBucket {
+  key       String   @id
+  count     Int
+  resetAt   DateTime
+  updatedAt DateTime @updatedAt
+
+  @@index([resetAt])
+}
+
 model Person {
   id                 String   @id @default(uuid())
   firstName          String
