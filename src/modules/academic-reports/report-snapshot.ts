@@ -47,6 +47,11 @@ export type ReportSnapshot = {
     assigned: boolean;
     reason: string | null;
     policyVersionId?: string | null;
+    policyVersion?: string | null;
+    gradeCode?: string | null;
+    descriptor?: string | null;
+    pass?: boolean | null;
+    points?: number | null;
   };
 };
 

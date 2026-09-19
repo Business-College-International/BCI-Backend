@@ -1,5 +1,6 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { RoleName, TermStatus } from '@prisma/client';
+import { resolveGrade } from './grading-engine';
 import { PrismaService } from '../../prisma.service';
 
 const PRIVILEGED_ROLES = new Set<RoleName>([
@@ -167,6 +168,77 @@ export class AcademicReportsService {
       ? null
       : Number((((attendanceCounts.PRESENT + attendanceCounts.LATE) / attendanceCounts.total) * 100).toFixed(2));
 
+    let grading: {
+      assigned: boolean;
+      reason: string | null;
+      policyVersionId: string | null;
+      policyVersion: string | null;
+      gradeCode: string | null;
+      descriptor: string | null;
+      pass: boolean | null;
+      points: number | null;
+    } = {
+      assigned: false,
+      reason: 'No active grading policy exists for the student academic scope.',
+      policyVersionId: null,
+      policyVersion: null,
+      gradeCode: null,
+      descriptor: null,
+      pass: null,
+      points: null,
+    };
+
+    if (overallPercentage === null) {
+      grading.reason = mode === 'MIXED_POLICY_REQUIRED'
+        ? 'Assessment weighting is mixed and requires a weighting policy before grade resolution.'
+        : 'No overall percentage is available for grade resolution.';
+    } else if (enrolment) {
+      const exact = enrolment.programme === 'NONE'
+        ? null
+        : await this.prisma.gradingPolicy.findFirst({
+            where: {
+              academicYearId: term.academicYearId,
+              level: enrolment.level,
+              programme: enrolment.programme,
+              status: 'ACTIVE',
+            },
+            include: { bands: { orderBy: { order: 'asc' } } },
+          });
+      const policy = exact ?? await this.prisma.gradingPolicy.findFirst({
+        where: {
+          academicYearId: term.academicYearId,
+          level: enrolment.level,
+          programme: null,
+          status: 'ACTIVE',
+        },
+        include: { bands: { orderBy: { order: 'asc' } } },
+      });
+
+      if (!policy) {
+        grading.reason = 'No active grading policy exists for the student academic-year/level/programme scope.';
+      } else {
+        const grade = resolveGrade(overallPercentage, policy.bands.map((band) => ({
+          code: band.code,
+          lowerInclusive: Number(band.lowerInclusive.toString()),
+          upperExclusive: band.upperExclusive == null ? null : Number(band.upperExclusive.toString()),
+          pass: band.pass,
+          descriptor: band.descriptor,
+          points: band.points == null ? null : Number(band.points.toString()),
+          order: band.order,
+        })));
+        grading = {
+          assigned: true,
+          reason: null,
+          policyVersionId: policy.id,
+          policyVersion: policy.version,
+          gradeCode: grade.code,
+          descriptor: grade.descriptor,
+          pass: grade.pass,
+          points: grade.points ?? null,
+        };
+      }
+    }
+
     return {
       student,
       term: {
@@ -207,10 +279,7 @@ export class AcademicReportsService {
           session: record.session,
         })),
       },
-      grading: {
-        assigned: false,
-        reason: 'No configurable school grading-band policy has been applied yet.',
-      },
+      grading,
       publication: {
         state: 'DRAFT_VIEW',
         persisted: false,
