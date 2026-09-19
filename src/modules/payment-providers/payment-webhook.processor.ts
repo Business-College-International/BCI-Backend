@@ -59,6 +59,7 @@ export class PaymentWebhookProcessor {
         include: {
           attempts: true,
           allocations: { select: { invoiceId: true } },
+          paymentIntents: { select: { id: true, invoiceId: true, amount: true, status: true, expiresAt: true } },
         },
       });
       if (!payment) throw new NotFoundException('Payment not found after locking.');
@@ -92,6 +93,25 @@ export class PaymentWebhookProcessor {
           status: normalized.paymentStatus,
           providerReference: normalized.providerReference,
           completedAt: normalized.completedAt,
+          failureCode: normalized.failureCode,
+          failureMessage: normalized.failureMessage,
+        },
+      });
+
+      const intentStatus =
+        normalized.paymentStatus === PaymentStatus.SUCCEEDED
+          ? 'SUCCEEDED'
+          : normalized.paymentStatus === PaymentStatus.FAILED
+            ? 'FAILED'
+            : normalized.paymentStatus === PaymentStatus.CANCELLED
+              ? 'CANCELLED'
+              : 'PROCESSING';
+      await tx.paymentIntent.updateMany({
+        where: { paymentId: payment.id, status: { in: ['PENDING', 'PROCESSING', 'UNKNOWN'] } },
+        data: {
+          status: intentStatus,
+          providerReference: normalized.providerReference,
+          completedAt: normalized.paymentStatus === PaymentStatus.SUCCEEDED || normalized.paymentStatus === PaymentStatus.FAILED || normalized.paymentStatus === PaymentStatus.CANCELLED ? normalized.completedAt : null,
           failureCode: normalized.failureCode,
           failureMessage: normalized.failureMessage,
         },
@@ -234,7 +254,24 @@ export class PaymentWebhookProcessor {
             }
           }
         }
-        const invoiceIds = [...new Set(payment.allocations.map((allocation) => allocation.invoiceId))];
+        if (payment.purpose === 'FEE') {
+          const intentTotal = payment.paymentIntents.reduce((sum, intent) => sum.plus(intent.amount), new Prisma.Decimal(0));
+          if (payment.paymentIntents.length === 0 || !intentTotal.eq(payment.amount)) {
+            await tx.providerWebhookEvent.update({
+              where: { id: event.id },
+              data: { processedAt: new Date(), processingError: 'Verified fee payment does not match its payment-intent reservation total.' },
+            });
+            return { applied: false, reason: 'payment-intent-total-mismatch' as const };
+          }
+          for (const intent of payment.paymentIntents) {
+            await tx.paymentAllocation.upsert({
+              where: { paymentId_invoiceId: { paymentId: payment.id, invoiceId: intent.invoiceId } },
+              update: { amount: intent.amount },
+              create: { paymentId: payment.id, invoiceId: intent.invoiceId, amount: intent.amount },
+            });
+          }
+        }
+        const invoiceIds = [...new Set(payment.paymentIntents.map((intent) => intent.invoiceId))];
         for (const invoiceId of invoiceIds) {
           await tx.$executeRaw`SELECT id FROM "StudentInvoice" WHERE id = ${invoiceId} FOR UPDATE`;
           const invoice = await tx.studentInvoice.findUnique({

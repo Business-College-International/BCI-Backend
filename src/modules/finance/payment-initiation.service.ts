@@ -10,6 +10,7 @@ const PRIVILEGED_FINANCE_ROLES = new Set<RoleName>([
   RoleName.ACCOUNTANT,
   RoleName.OFFICE,
 ]);
+const PAYMENT_INTENT_TTL_MS = 15 * 60 * 1000;
 
 @Injectable()
 export class PaymentInitiationService {
@@ -110,6 +111,7 @@ export class PaymentInitiationService {
                 failureMessage: message,
                 retryable: true,
                 allocations: reservation.allocations,
+                intents: reservation.intents,
               },
               statusCode: error.getStatus(),
               completedAt: new Date(),
@@ -157,6 +159,11 @@ export class PaymentInitiationService {
             provider: this.moolre.provider,
             providerReference: providerResult.providerReference,
           },
+        });
+
+        await tx.paymentIntent.updateMany({
+          where: { paymentId: reservation.payment.id, status: 'PENDING' },
+          data: { status: 'PROCESSING', provider: this.moolre.provider, providerReference: providerResult.providerReference },
         });
 
         await tx.paymentProviderAttempt.update({
@@ -256,6 +263,21 @@ export class PaymentInitiationService {
         if (invoices.length !== dto.invoiceIds.length) {
           throw new ConflictException('One or more selected invoices are unavailable for payment.');
         }
+        const activeIntents = await tx.paymentIntent.findMany({
+          where: {
+            invoiceId: { in: invoices.map((invoice) => invoice.id) },
+            status: { in: ['PENDING', 'PROCESSING'] },
+            expiresAt: { gt: new Date() },
+          },
+          select: { invoiceId: true, amount: true },
+        });
+        const activeIntentsByInvoice = new Map<string, Prisma.Decimal>();
+        for (const intent of activeIntents) {
+          activeIntentsByInvoice.set(
+            intent.invoiceId,
+            (activeIntentsByInvoice.get(intent.invoiceId) ?? new Prisma.Decimal(0)).plus(intent.amount),
+          );
+        }
 
         const availableByInvoice = invoices.map((invoice) => {
           const due = invoice.lines.reduce((sum, line) => sum.plus(line.amountDue), new Prisma.Decimal(0));
@@ -267,9 +289,7 @@ export class PaymentInitiationService {
                 .reduce((refundSum, refund) => refundSum.plus(refund.amount), new Prisma.Decimal(0));
               return sum.plus(Prisma.Decimal.max(allocation.amount.minus(refunded), 0));
             }, new Prisma.Decimal(0));
-          const reserved = invoice.allocations
-            .filter((allocation) => allocation.payment.status === PaymentStatus.PENDING || allocation.payment.status === PaymentStatus.PROCESSING)
-            .reduce((sum, allocation) => sum.plus(allocation.amount), new Prisma.Decimal(0));
+          const reserved = activeIntentsByInvoice.get(invoice.id) ?? new Prisma.Decimal(0);
           return { invoice, available: due.minus(settled).minus(reserved) };
         });
 
@@ -298,16 +318,37 @@ export class PaymentInitiationService {
 
         let remaining = requestedAmount;
         const allocations: Array<{ invoiceId: string; invoiceNumber: string; amount: string }> = [];
+        const intents: Array<{ id: string; invoiceId: string; amount: string; expiresAt: string }> = [];
+        const expiresAt = new Date(Date.now() + PAYMENT_INTENT_TTL_MS);
         for (const item of availableByInvoice) {
           if (remaining.lte(0)) break;
           const amount = Prisma.Decimal.min(remaining, item.available);
-          await tx.paymentAllocation.create({
-            data: { paymentId: payment.id, invoiceId: item.invoice.id, amount },
-          });
           allocations.push({
             invoiceId: item.invoice.id,
             invoiceNumber: item.invoice.invoiceNumber,
             amount: amount.toFixed(2),
+          });
+          const intent = await tx.paymentIntent.create({
+            data: {
+              studentId,
+              invoiceId: item.invoice.id,
+              amount,
+              currency: payment.currency,
+              status: 'PENDING',
+              initiatedByUserId: actorUserId,
+              provider: this.moolre.provider,
+              clientReference,
+              idempotencyKey,
+              paymentId: payment.id,
+              expiresAt,
+            },
+            select: { id: true, invoiceId: true, amount: true, expiresAt: true },
+          });
+          intents.push({
+            id: intent.id,
+            invoiceId: intent.invoiceId,
+            amount: intent.amount.toFixed(2),
+            expiresAt: intent.expiresAt.toISOString(),
           });
           remaining = remaining.minus(amount);
         }
@@ -342,6 +383,7 @@ export class PaymentInitiationService {
               clientReference: payment.clientReference,
               reservation: true,
               allocations,
+              intents,
             },
           },
         });
@@ -350,6 +392,7 @@ export class PaymentInitiationService {
           payment,
           attemptId: attempt.id,
           allocations,
+          intents,
           customer: guardian,
         };
       });

@@ -30,12 +30,15 @@ describe('PaymentWebhookProcessor', () => {
             studentId: 'student-1',
             status: PaymentStatus.PROCESSING,
             attempts: [{ id: 'attempt-1', provider: 'TEST', providerReference: 'provider-ref-1' }],
-            allocations: [{ invoiceId: 'invoice-1' }],
+            allocations: [],
+            paymentIntents: [{ id: 'intent-1', invoiceId: 'invoice-1', amount: new Prisma.Decimal('100.00'), status: 'SUCCEEDED', expiresAt: new Date('2026-09-19T06:15:00.000Z') }],
           }),
           update: jest.fn().mockResolvedValue({}),
         },
         paymentProviderAttempt: { update: jest.fn().mockResolvedValue({}) },
+        paymentIntent: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
         receipt: { upsert: receiptUpsert },
+        paymentAllocation: { upsert: jest.fn().mockResolvedValue({ id: 'allocation-1' }) },
         auditLog: { create: jest.fn().mockResolvedValue({}) },
         studentInvoice: {
           findUnique: jest.fn().mockResolvedValue({
@@ -122,6 +125,7 @@ describe('PaymentWebhookProcessor', () => {
             status: PaymentStatus.PROCESSING,
             attempts: [],
             allocations: [],
+            paymentIntents: [],
           }),
         },
         providerWebhookEvent: {
@@ -152,6 +156,7 @@ describe('PaymentWebhookProcessor', () => {
             status: PaymentStatus.SUCCEEDED,
             attempts: [],
             allocations: [],
+            paymentIntents: [],
           }),
         },
         providerWebhookEvent: {
@@ -179,6 +184,7 @@ describe('PaymentWebhookProcessor', () => {
       status: PaymentStatus.PROCESSING,
       attempts: [{ id: 'attempt-1', provider: 'TEST', providerReference: 'provider-ref-1' }],
       allocations: [],
+      paymentIntents: [],
     });
 
     const prisma = {
@@ -193,6 +199,7 @@ describe('PaymentWebhookProcessor', () => {
           update: jest.fn().mockResolvedValue({}),
         },
         paymentProviderAttempt: { update: jest.fn().mockResolvedValue({}) },
+        paymentIntent: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
         wallet: { upsert: walletUpsert },
         walletTransaction: {
           findUnique: jest.fn().mockResolvedValue(null),
@@ -254,10 +261,12 @@ describe('PaymentWebhookProcessor', () => {
             status: PaymentStatus.SUCCEEDED,
             attempts: [],
             allocations: [],
+            paymentIntents: [],
           }),
           update: jest.fn().mockResolvedValue({}),
         },
         paymentProviderAttempt: { update: jest.fn().mockResolvedValue({}) },
+        paymentIntent: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
         wallet: { upsert: jest.fn().mockResolvedValue({ studentId: 'student-1', currency: 'GHS' }) },
         walletTransaction: {
           findUnique: walletTransactionFind,
@@ -290,11 +299,12 @@ describe('PaymentWebhookProcessor', () => {
           findUnique: jest.fn().mockResolvedValue({
             id: 'payment-stationery-lock', amount: new Prisma.Decimal('25.00'), currency: 'GHS',
             purpose: 'STATIONERY', studentId: 'student-1', guardianId: 'guardian-1', status: PaymentStatus.PROCESSING,
-            attempts: [], allocations: [],
+            attempts: [], allocations: [], paymentIntents: [],
           }),
           update: jest.fn().mockResolvedValue({}),
         },
         paymentProviderAttempt: { update: jest.fn().mockResolvedValue({}) },
+        paymentIntent: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
         receipt: { upsert: jest.fn().mockResolvedValue({ id: 'receipt-lock', receiptNumber: 'BCI-RCPT-2026-LOCK' }) },
         auditLog: { create: jest.fn().mockResolvedValue({}) },
         stationeryOrder: {
@@ -334,11 +344,12 @@ describe('PaymentWebhookProcessor', () => {
           findUnique: jest.fn().mockResolvedValue({
             id: 'payment-stationery-1', amount: new Prisma.Decimal('25.00'), currency: 'GHS',
             purpose: 'STATIONERY', studentId: 'student-1', guardianId: 'guardian-1', status: PaymentStatus.PROCESSING,
-            attempts: [], allocations: [],
+            attempts: [], allocations: [], paymentIntents: [],
           }),
           update: jest.fn().mockResolvedValue({}),
         },
         paymentProviderAttempt: { update: jest.fn().mockResolvedValue({}) },
+        paymentIntent: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
         receipt: { upsert: jest.fn().mockResolvedValue({ id: 'receipt-2', receiptNumber: 'BCI-RCPT-2026-TEST-2' }) },
         auditLog: { create: jest.fn().mockResolvedValue({}) },
         stationeryOrder: {

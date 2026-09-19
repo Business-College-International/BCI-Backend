@@ -160,6 +160,10 @@ export class PaymentOtpService {
               failureMessage: message,
             },
           });
+          await tx.paymentIntent.updateMany({
+            where: { paymentId: reservation.payment.id, status: { in: ['PENDING', 'PROCESSING', 'UNKNOWN'] } },
+            data: { status: 'FAILED', failureCode: 'OTP_SUBMISSION_FAILED', failureMessage: message, completedAt: new Date() },
+          });
           await tx.idempotencyKey.update({
             where: { userId_key_operation: { userId: actorUserId, key: idempotencyKey.trim(), operation: 'payments.otp' } },
             data: {
@@ -173,6 +177,10 @@ export class PaymentOtpService {
       }
 
       await this.prisma.$transaction(async (tx) => {
+        await tx.paymentIntent.updateMany({
+          where: { paymentId: reservation.payment.id, status: { in: ['PENDING', 'PROCESSING', 'UNKNOWN'] } },
+          data: { status: 'PROCESSING', failureCode: 'OTP_SUBMISSION_UNKNOWN', failureMessage: 'OTP submission outcome is unknown; awaiting webhook reconciliation.', completedAt: null },
+        });
         await tx.paymentProviderAttempt.updateMany({
           where: {
             id: reservation.attemptId,
@@ -214,6 +222,10 @@ export class PaymentOtpService {
           provider: this.moolre.provider,
           providerReference: providerResult.providerReference ?? reservation.payment.providerReference,
         },
+      });
+      await tx.paymentIntent.updateMany({
+        where: { paymentId: reservation.payment.id, status: { in: ['PENDING', 'PROCESSING', 'UNKNOWN'] } },
+        data: { status: 'PROCESSING', provider: this.moolre.provider, providerReference: providerResult.providerReference },
       });
       await tx.paymentProviderAttempt.updateMany({
         where: { id: reservation.attemptId, status: { in: [PaymentStatus.PENDING, PaymentStatus.PROCESSING] } },
@@ -265,6 +277,10 @@ export class PaymentOtpService {
                 provider: this.moolre.provider,
                 providerReference: providerResult.providerReference ?? reservation.payment.providerReference,
               },
+            });
+            await tx.paymentIntent.updateMany({
+              where: { paymentId: reservation.payment.id, status: { in: ['PENDING', 'PROCESSING', 'UNKNOWN'] } },
+              data: { status: 'PROCESSING', provider: this.moolre.provider, providerReference: providerResult.providerReference, failureCode: 'OTP_LOCAL_PERSISTENCE_UNKNOWN', failureMessage: 'Provider accepted the OTP, but local settlement state is unknown; reconcile before retrying.', completedAt: null },
             });
             await tx.paymentProviderAttempt.updateMany({
               where: { id: reservation.attemptId, status: { in: [PaymentStatus.PENDING, PaymentStatus.PROCESSING] } },
