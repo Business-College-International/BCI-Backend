@@ -3,7 +3,6 @@ import { Prisma, ReportCardCorrectionDecision, ReportCardPublicationStatus, Role
 import { createHash } from 'node:crypto';
 import { PrismaService } from '../../prisma.service';
 import { AcademicReportsService } from './academic-reports.service';
-import { ReportCardPublicationService } from './report-card-publication.service';
 import { assertCorrectionDecisionTransition } from './publication-state';
 
 const REQUEST_ROLES = new Set<RoleName>([RoleName.TEACHER]);
@@ -14,7 +13,6 @@ export class ReportCardCorrectionService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly reports: AcademicReportsService,
-    private readonly publications: ReportCardPublicationService,
   ) {}
 
   async request(
