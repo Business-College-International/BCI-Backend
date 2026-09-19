@@ -123,7 +123,10 @@ export class GradingPolicyService {
         this.assertValidBands(this.toGradeBands(policy.bands));
 
         const scopeKey = policy.academicYearId + ':' + policy.level + ':' + (policy.programme ?? 'GENERIC');
-        await tx.$executeRaw\`SELECT pg_advisory_xact_lock(hashtext('bci:grading-policy:' || \${scopeKey}))\`;
+        await tx.$executeRawUnsafe(
+          "SELECT pg_advisory_xact_lock(hashtext('bci:grading-policy:' || $1))",
+          scopeKey,
+        );
 
         const existingActive = await tx.gradingPolicy.findFirst({
           where: {
