@@ -10,6 +10,7 @@ function makePrisma() {
     payment: { findUnique: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
     person: { findUnique: jest.fn() },
     paymentProviderAttempt: { findFirst: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
+    paymentIntent: { updateMany: jest.fn() },
     auditLog: { create: jest.fn() },
     $queryRaw: jest.fn().mockResolvedValue([]),
     $transaction: jest.fn(),

@@ -35,6 +35,7 @@ describe('PaymentWebhookProcessor', () => {
           update: jest.fn().mockResolvedValue({}),
         },
         paymentProviderAttempt: { update: jest.fn().mockResolvedValue({}) },
+        paymentIntent: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
         receipt: { upsert: receiptUpsert },
         auditLog: { create: jest.fn().mockResolvedValue({}) },
         studentInvoice: {
