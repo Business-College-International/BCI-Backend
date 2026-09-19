@@ -1,4 +1,4 @@
-import type { NextFunction, Request, Response } from 'express';
+import type { Request, Response } from 'express';
 import { createRateLimitMiddleware, PrismaRateLimitStore, RateLimitStore } from './rate-limit.middleware';
 
 function makeRequest(path: string, ip = '203.0.113.10'): Request {
