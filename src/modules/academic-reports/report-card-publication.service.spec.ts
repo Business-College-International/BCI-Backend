@@ -43,7 +43,9 @@ describe('ReportCardPublicationService', () => {
     };
     const readiness = { getClassReadiness: jest.fn().mockResolvedValue({ students: [{ student: { id: 'student-1' }, ready: true, reasons: [] }] }) };
     prisma.term.findUnique.mockResolvedValue({ id: 'term-1', status: 'CLOSED' });
-    tx.reportCardPublication.findFirst.mockResolvedValue({ publicationVersion: 2 });
+    tx.reportCardPublication.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ publicationVersion: 2 });
     tx.reportCardPublication.create.mockResolvedValue({ id: 'pub-1', status: ReportCardPublicationStatus.READY_FOR_PUBLICATION, publicationVersion: 3 });
 
     const service = new ReportCardPublicationService(prisma as never, reports as never, readiness as never);
