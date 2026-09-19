@@ -161,7 +161,7 @@ export class PaymentOtpService {
             },
           });
           await tx.paymentIntent.updateMany({
-            where: { paymentId: payment.id, status: { in: ['PENDING', 'PROCESSING', 'UNKNOWN'] } },
+            where: { paymentId: reservation.payment.id, status: { in: ['PENDING', 'PROCESSING', 'UNKNOWN'] } },
             data: { status: 'FAILED', failureCode: 'OTP_SUBMISSION_FAILED', failureMessage: message, completedAt: new Date() },
           });
           await tx.idempotencyKey.update({
