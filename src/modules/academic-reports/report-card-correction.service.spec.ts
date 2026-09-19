@@ -35,7 +35,7 @@ describe('ReportCardCorrectionService', () => {
     const { prisma } = makePrisma();
     const reports = { getStudentTermSummary: jest.fn() };
     const publications = {};
-    const service = new ReportCardCorrectionService(prisma as never, reports as never, publications as never);
+    const service = new ReportCardCorrectionService(prisma as never, reports as never);
 
     await expect(service.request('student-1', 'term-1', 'Wrong mark', 'user-1', [RoleName.GUARDIAN]))
       .rejects.toBeInstanceOf(ForbiddenException);
@@ -52,7 +52,7 @@ describe('ReportCardCorrectionService', () => {
     const publications = {};
     tx.reportCardCorrectionRequest.findFirst.mockResolvedValue(null);
     tx.reportCardCorrectionRequest.create.mockImplementation(async ({ data }: any) => ({ id: 'corr-1', ...data }));
-    const service = new ReportCardCorrectionService(prisma as never, reports as never, publications as never);
+    const service = new ReportCardCorrectionService(prisma as never, reports as never);
 
     const result = await service.request('student-1', 'term-1', 'Assessment result needs correction.', 'teacher-1', [RoleName.TEACHER]);
 
@@ -71,7 +71,7 @@ describe('ReportCardCorrectionService', () => {
     prisma.reportCardPublication.findFirst.mockResolvedValue({ id: 'pub-1', publicationVersion: 1, status: ReportCardPublicationStatus.PUBLISHED });
     const reports = { getStudentTermSummary: jest.fn().mockResolvedValue(report) };
     tx.reportCardCorrectionRequest.findFirst.mockResolvedValue({ id: 'corr-existing' });
-    const service = new ReportCardCorrectionService(prisma as never, reports as never, {});
+    const service = new ReportCardCorrectionService(prisma as never, reports as never);
 
     await expect(service.request('student-1', 'term-1', 'Duplicate correction request', 'teacher-1', [RoleName.TEACHER]))
       .rejects.toBeInstanceOf(ConflictException);
@@ -130,7 +130,7 @@ describe('ReportCardCorrectionService', () => {
       approvedPublicationId: 'pub-2',
     });
 
-    const service = new ReportCardCorrectionService(prisma as never, reports as never, {});
+    const service = new ReportCardCorrectionService(prisma as never, reports as never);
 
     const result = await service.approve('corr-1', 'Reviewed source result and approved correction.', 'principal-1', [RoleName.PRINCIPAL]);
 
@@ -162,7 +162,7 @@ describe('ReportCardCorrectionService', () => {
       id: 'corr-1',
       decision: ReportCardCorrectionDecision.REJECTED,
     });
-    const service = new ReportCardCorrectionService(prisma as never, {}, {});
+    const service = new ReportCardCorrectionService(prisma as never, {} as never);
 
     const result = await service.reject('corr-1', 'Source evidence does not support a correction.', 'office-1', [RoleName.OFFICE]);
 
