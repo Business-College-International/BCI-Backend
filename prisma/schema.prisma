@@ -122,6 +122,11 @@ enum WalletWithdrawalStatus {
   DISPENSED
   REVERSED
 }
+enum GradingPolicyStatus {
+  DRAFT
+  ACTIVE
+  RETIRED
+}
 enum ExpenseStatus {
   DRAFT
   SUBMITTED
@@ -278,9 +283,10 @@ model AcademicYear {
   isCurrent  Boolean  @default(false)
   createdAt  DateTime @default(now())
 
-  terms      Term[]
-  classes    SchoolClass[]
-  enrolments Enrolment[]
+  terms          Term[]
+  classes        SchoolClass[]
+  enrolments     Enrolment[]
+  gradingPolicies GradingPolicy[]
 }
 
 model Term {
@@ -678,6 +684,42 @@ model AssessmentResult {
 
   @@unique([assessmentId, studentId])
   @@index([studentId, assessmentId])
+}
+
+model GradingPolicy {
+  id             String              @id @default(uuid())
+  version        String              @unique
+  name           String
+  academicYearId String
+  level          Level
+  programme      Programme?
+  status         GradingPolicyStatus @default(DRAFT)
+  createdAt      DateTime            @default(now())
+  publishedAt    DateTime?
+  publishedBy    String?
+
+  academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
+  bands        GradingBand[]
+
+  @@index([academicYearId, level, programme, status])
+}
+
+model GradingBand {
+  id             String  @id @default(uuid())
+  policyId       String
+  code           String
+  lowerInclusive Decimal @db.Decimal(5, 2)
+  upperExclusive Decimal? @db.Decimal(5, 2)
+  pass           Boolean
+  descriptor     String
+  points         Decimal? @db.Decimal(8, 2)
+  order          Int
+
+  policy GradingPolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+
+  @@unique([policyId, code])
+  @@unique([policyId, order])
+  @@index([policyId, lowerInclusive])
 }
 
 model FeeSchedule {

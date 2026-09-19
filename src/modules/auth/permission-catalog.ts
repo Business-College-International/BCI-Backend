@@ -10,6 +10,8 @@ export const PERMISSIONS = {
   ATTENDANCE_MANAGE: 'attendance.manage',
   ASSESSMENTS_READ: 'assessments.read',
   ASSESSMENTS_MANAGE: 'assessments.manage',
+  GRADING_READ: 'grading.read',
+  GRADING_MANAGE: 'grading.manage',
   FINANCE_READ: 'finance.read',
   FINANCE_MANAGE: 'finance.manage',
   PAYMENTS_MANAGE: 'payments.manage',
