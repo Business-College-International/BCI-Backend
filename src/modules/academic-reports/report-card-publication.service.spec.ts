@@ -11,6 +11,7 @@ describe('ReportCardPublicationService', () => {
     };
     const prisma = {
       ...tx,
+      student: { findUnique: jest.fn() },
       term: { findUnique: jest.fn() },
       reportCardPublication: tx.reportCardPublication,
       $transaction: jest.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
@@ -59,8 +60,8 @@ describe('ReportCardPublicationService', () => {
 
   it('returns immutable publication history for authorized leadership', async () => {
     const { prisma } = makePrisma();
-    prisma.student = { findUnique: jest.fn().mockResolvedValue({ id: 'student-1' }) };
-    prisma.term = { findUnique: jest.fn().mockResolvedValue({ id: 'term-1' }) };
+    prisma.student.findUnique.mockResolvedValue({ id: 'student-1' });
+    prisma.term.findUnique.mockResolvedValue({ id: 'term-1' });
     prisma.reportCardPublication.findMany = jest.fn().mockResolvedValue([
       { id: 'pub-2', publicationVersion: 2, status: ReportCardPublicationStatus.VOIDED },
       { id: 'pub-1', publicationVersion: 1, status: ReportCardPublicationStatus.PUBLISHED },
@@ -82,8 +83,6 @@ describe('ReportCardPublicationService', () => {
 
   it('rejects publication history access for teachers and guardians', async () => {
     const { prisma } = makePrisma();
-    prisma.student = { findUnique: jest.fn() };
-    prisma.term = { findUnique: jest.fn() };
     prisma.reportCardPublication.findMany = jest.fn();
 
     const reports = { getStudentTermSummary: jest.fn() };
