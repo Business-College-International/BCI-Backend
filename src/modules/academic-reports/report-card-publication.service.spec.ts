@@ -6,11 +6,12 @@ describe('ReportCardPublicationService', () => {
   function makePrisma() {
     const tx = {
       $executeRawUnsafe: jest.fn(),
-      reportCardPublication: { findUnique: jest.fn(), findFirst: jest.fn(), create: jest.fn(), update: jest.fn() },
+      reportCardPublication: { findUnique: jest.fn(), findFirst: jest.fn(), findMany: jest.fn(), create: jest.fn(), update: jest.fn() },
       auditLog: { create: jest.fn() },
     };
     const prisma = {
       ...tx,
+      student: { findUnique: jest.fn() },
       term: { findUnique: jest.fn() },
       reportCardPublication: tx.reportCardPublication,
       $transaction: jest.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
@@ -55,6 +56,41 @@ describe('ReportCardPublicationService', () => {
     expect(tx.reportCardPublication.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ studentId: 'student-1', termId: 'term-1', publicationVersion: 3, gradingPolicyVersionId: 'policy-1' }),
     }));
+  });
+
+  it('returns immutable publication history for authorized leadership', async () => {
+    const { prisma } = makePrisma();
+    prisma.student.findUnique.mockResolvedValue({ id: 'student-1' });
+    prisma.term.findUnique.mockResolvedValue({ id: 'term-1' });
+    prisma.reportCardPublication.findMany.mockResolvedValueOnce([
+      { id: 'pub-2', publicationVersion: 2, status: ReportCardPublicationStatus.VOIDED },
+      { id: 'pub-1', publicationVersion: 1, status: ReportCardPublicationStatus.PUBLISHED },
+    ]);
+
+    const reports = { getStudentTermSummary: jest.fn() };
+    const readiness = { getClassReadiness: jest.fn() };
+    const service = new ReportCardPublicationService(prisma as never, reports as never, readiness as never);
+
+    const history = await service.history('student-1', 'term-1', ['PRINCIPAL'] as never);
+
+    expect(history).toHaveLength(2);
+    expect(history[0].publicationVersion).toBe(2);
+    expect(prisma.reportCardPublication.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { studentId: 'student-1', termId: 'term-1' },
+      orderBy: { publicationVersion: 'desc' },
+    }));
+  });
+
+  it('rejects publication history access for teachers and guardians', async () => {
+    const { prisma } = makePrisma();
+    prisma.reportCardPublication.findMany.mockImplementation(jest.fn());
+
+    const reports = { getStudentTermSummary: jest.fn() };
+    const readiness = { getClassReadiness: jest.fn() };
+    const service = new ReportCardPublicationService(prisma as never, reports as never, readiness as never);
+
+    await expect(service.history('student-1', 'term-1', ['TEACHER'] as never)).rejects.toBeInstanceOf(Error);
+    expect(prisma.reportCardPublication.findMany).not.toHaveBeenCalled();
   });
 
   it('requires a reason when voiding', async () => {
