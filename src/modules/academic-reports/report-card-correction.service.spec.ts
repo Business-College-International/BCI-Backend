@@ -49,6 +49,7 @@ describe('ReportCardCorrectionService', () => {
     });
     const reports = { getStudentTermSummary: jest.fn().mockResolvedValue(report) };
     tx.reportCardCorrectionRequest.findFirst.mockResolvedValue(null);
+    // Simulate the row returned after the transaction acquires the publication lock.
     tx.reportCardPublication.findUnique.mockResolvedValue({
       id: 'pub-1',
       publicationVersion: 1,
