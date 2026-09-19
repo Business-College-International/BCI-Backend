@@ -48,9 +48,11 @@ function makeService() {
     paymentAllocation: { create: jest.fn().mockResolvedValue({}) },
     paymentProviderAttempt: {
       create: jest.fn().mockResolvedValue({ id: 'attempt-1' }),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       update: jest.fn().mockResolvedValue({}),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
+    paymentIntent: { create: jest.fn().mockResolvedValue({ id: 'intent-1', invoiceId: 'invoice-1', amount: new Prisma.Decimal('50.00'), expiresAt: new Date('2026-09-19T06:15:00.000Z') }), updateMany: jest.fn().mockResolvedValue({ count: 1 }), findMany: jest.fn().mockResolvedValue([]) },
     auditLog: { create: jest.fn().mockResolvedValue({}) },
   };
 
@@ -94,6 +96,9 @@ describe('PaymentInitiationService', () => {
     const result = await service.initiate('student-1', dto, 'guardian-user', [RoleName.GUARDIAN], 'idem-1');
 
     expect(reservationTx.$executeRaw).toHaveBeenCalled();
+    expect(reservationTx.paymentIntent.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ studentId: 'student-1', invoiceId: 'invoice-1', paymentId: 'payment-1', status: 'PENDING' }),
+    }));
     expect(reservationTx.payment.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ amount: new Prisma.Decimal('50.00'), idempotencyKey: 'idem-1' }),
     }));

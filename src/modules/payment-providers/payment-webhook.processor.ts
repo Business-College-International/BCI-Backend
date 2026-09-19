@@ -97,6 +97,25 @@ export class PaymentWebhookProcessor {
         },
       });
 
+      const intentStatus =
+        normalized.paymentStatus === PaymentStatus.SUCCEEDED
+          ? 'SUCCEEDED'
+          : normalized.paymentStatus === PaymentStatus.FAILED
+            ? 'FAILED'
+            : normalized.paymentStatus === PaymentStatus.CANCELLED
+              ? 'CANCELLED'
+              : 'PROCESSING';
+      await tx.paymentIntent.updateMany({
+        where: { paymentId: payment.id, status: { in: ['PENDING', 'PROCESSING', 'UNKNOWN'] } },
+        data: {
+          status: intentStatus,
+          providerReference: normalized.providerReference,
+          completedAt: normalized.paymentStatus === PaymentStatus.SUCCEEDED || normalized.paymentStatus === PaymentStatus.FAILED || normalized.paymentStatus === PaymentStatus.CANCELLED ? normalized.completedAt : null,
+          failureCode: normalized.failureCode,
+          failureMessage: normalized.failureMessage,
+        },
+      });
+
       const attempt = payment.attempts.find(
         (candidate) => candidate.provider === normalized.provider && candidate.providerReference === normalized.providerReference,
       );

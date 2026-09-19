@@ -147,11 +147,9 @@ export class PaymentInitiationService {
             resolvedAt: null,
           },
         });
-        await this.prisma.$transaction(async (tx) => {
-          await tx.paymentIntent.updateMany({
-            where: { paymentId: reservation.payment.id, status: 'PENDING' },
-            data: { status: 'PROCESSING' },
-          });
+        await tx.paymentIntent.updateMany({
+          where: { paymentId: reservation.payment.id, status: 'PENDING' },
+          data: { status: 'PROCESSING' },
         });
       });
 
