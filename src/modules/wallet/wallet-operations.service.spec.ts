@@ -9,6 +9,7 @@ describe('WalletOperationsService', () => {
     $queryRaw: jest.fn().mockResolvedValue([{ studentId: 'student-1' }]),
     wallet: { findUnique: jest.fn() },
     walletTransaction: { create: jest.fn() },
+    walletWithdrawal: { create: jest.fn(), update: jest.fn() },
     auditLog: { create: jest.fn() },
   } as any;
   const prisma = {
@@ -90,7 +91,7 @@ describe('WalletOperationsService', () => {
       studentId: 'student-1',
       currency: 'GHS',
       transactions: [
-        { id: 'top-up', type: WalletTransactionType.TOP_UP, direction: WalletTransactionDirection.CREDIT, amount: new Prisma.Decimal('100'), reversalOfId: null, paymentId: 'payment-1' },
+        { id: 'top-up', type: WalletTransactionType.TOP_UP, direction: WalletTransactionDirection.CREDIT, amount: new Prisma.Decimal('100'), reversalOfId: null, paymentId: 'payment-1', withdrawalId: null },
       ],
     });
 
@@ -136,6 +137,7 @@ describe('WalletOperationsService', () => {
       ],
     });
     tx.walletTransaction.create.mockResolvedValue({ id: 'new-withdrawal', amount: new Prisma.Decimal('50') });
+    tx.walletWithdrawal.create.mockResolvedValue({ id: 'withdrawal-1', status: 'DISPENSED' });
 
     await expect(
       new WalletOperationsService(prisma).withdraw(
@@ -152,12 +154,27 @@ describe('WalletOperationsService', () => {
     });
 
     expect(tx.$queryRaw).toHaveBeenCalled();
+    expect(tx.walletWithdrawal.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        studentId: 'student-1',
+        amount: new Prisma.Decimal('50'),
+        status: 'DISPENSED',
+        requestedBy: 'user-1',
+        approvedBy: 'user-1',
+        verifiedBy: 'user-1',
+        requestedAt: expect.any(Date),
+        approvedAt: expect.any(Date),
+        verifiedAt: expect.any(Date),
+        dispensedAt: expect.any(Date),
+      }),
+    });
     expect(tx.walletTransaction.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         walletId: 'student-1',
         type: WalletTransactionType.WITHDRAWAL,
         direction: WalletTransactionDirection.DEBIT,
         amount: new Prisma.Decimal('50'),
+        withdrawalId: 'withdrawal-1',
         processedBy: 'user-1',
       }),
     });
@@ -178,6 +195,7 @@ describe('WalletOperationsService', () => {
       id: 'reversal-1',
       amount: new Prisma.Decimal('100'),
     });
+    tx.walletWithdrawal.update.mockResolvedValue({});
 
     await expect(
       new WalletOperationsService(prisma).reverse(

@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, RoleName, WalletTransactionDirection, WalletTransactionType } from '@prisma/client';
+import { Prisma, RoleName, WalletTransactionDirection, WalletTransactionType, WalletWithdrawalStatus } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { PrismaService } from '../../prisma.service';
 import { WithdrawWalletDto } from './dto/withdraw-wallet.dto';
@@ -73,7 +73,15 @@ export class WalletOperationsService {
           include: {
             transactions: {
               orderBy: { createdAt: 'asc' },
-              select: { id: true, type: true, direction: true, amount: true, reversalOfId: true, paymentId: true },
+              select: {
+                id: true,
+                type: true,
+                direction: true,
+                amount: true,
+                reversalOfId: true,
+                paymentId: true,
+                withdrawalId: true,
+              },
             },
           },
         });
@@ -97,12 +105,30 @@ export class WalletOperationsService {
           throw new ConflictException(`Insufficient wallet balance. Available balance: ${balance.toFixed(2)}.`);
         }
 
+        const now = new Date();
+        const withdrawal = await tx.walletWithdrawal.create({
+          data: {
+            studentId,
+            amount,
+            reason: dto.note?.trim() || 'Office wallet withdrawal',
+            status: WalletWithdrawalStatus.DISPENSED,
+            requestedBy: actorUserId,
+            approvedBy: actorUserId,
+            verifiedBy: actorUserId,
+            requestedAt: now,
+            approvedAt: now,
+            verifiedAt: now,
+            dispensedAt: now,
+          },
+        });
+
         const transaction = await tx.walletTransaction.create({
           data: {
             walletId: studentId,
             type: WalletTransactionType.WITHDRAWAL,
             direction: WalletTransactionDirection.DEBIT,
             amount,
+            withdrawalId: withdrawal.id,
             processedBy: actorUserId,
             note: dto.note?.trim() || 'Office wallet withdrawal',
           },
@@ -110,11 +136,13 @@ export class WalletOperationsService {
 
         const response = {
           transactionId: transaction.id,
+          withdrawalId: withdrawal.id,
           studentId,
           amount: transaction.amount.toString(),
           currency: wallet.currency,
           balance: balance.minus(amount).toFixed(2),
           status: 'COMPLETED',
+          withdrawalStatus: withdrawal.status,
         };
 
         await tx.auditLog.create({
@@ -271,6 +299,17 @@ export class WalletOperationsService {
             note: reason,
           },
         });
+
+        if (original.withdrawalId) {
+          await tx.walletWithdrawal.update({
+            where: { id: original.withdrawalId },
+            data: {
+              status: WalletWithdrawalStatus.REVERSED,
+              reversedBy: actorUserId,
+              reversedAt: new Date(),
+            },
+          });
+        }
 
         const response = {
           transactionId: transaction.id,
