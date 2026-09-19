@@ -14,6 +14,8 @@ export const PERMISSIONS = {
   GRADING_MANAGE: 'grading.manage',
   REPORTS_READ: 'reports.read',
   REPORTS_PUBLISH: 'reports.publish',
+  REPORTS_CORRECTION_REQUEST: 'reports.correction.request',
+  REPORTS_CORRECTION_REVIEW: 'reports.correction.review',
   FINANCE_READ: 'finance.read',
   FINANCE_MANAGE: 'finance.manage',
   PAYMENTS_MANAGE: 'payments.manage',
