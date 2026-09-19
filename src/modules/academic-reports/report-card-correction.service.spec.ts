@@ -49,6 +49,11 @@ describe('ReportCardCorrectionService', () => {
     });
     const reports = { getStudentTermSummary: jest.fn().mockResolvedValue(report) };
     tx.reportCardCorrectionRequest.findFirst.mockResolvedValue(null);
+    tx.reportCardPublication.findUnique.mockResolvedValue({
+      id: 'pub-1',
+      publicationVersion: 1,
+      status: ReportCardPublicationStatus.PUBLISHED,
+    });
     tx.reportCardCorrectionRequest.create.mockImplementation(async ({ data }: any) => ({ id: 'corr-1', ...data }));
     const service = new ReportCardCorrectionService(prisma as never, reports as never);
 
