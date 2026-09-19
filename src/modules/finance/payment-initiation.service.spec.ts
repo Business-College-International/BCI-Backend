@@ -1,4 +1,4 @@
-import { ConflictException, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ServiceUnavailableException } from '@nestjs/common';
 import { PaymentStatus, Prisma, RoleName } from '@prisma/client';
 import { PaymentInitiationService } from './payment-initiation.service';
 
@@ -101,6 +101,41 @@ describe('PaymentInitiationService', () => {
       customer: expect.objectContaining({ network: 'TELECEL' }),
     }));
     expect(result).toMatchObject({ paymentId: 'payment-1', status: PaymentStatus.PROCESSING, providerReference: 'moolre-ref-1' });
+  });
+
+  it('records an explicit provider rejection as failed instead of processing', async () => {
+    const { service, moolre, prisma, completionTx } = makeService();
+    moolre.initiatePayment.mockRejectedValueOnce(new BadRequestException('Invalid phone number.'));
+
+    await expect(service.initiate('student-1', dto, 'guardian-user', [RoleName.GUARDIAN], 'idem-rejected'))
+      .rejects.toBeInstanceOf(BadRequestException);
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(completionTx.payment.updateMany).toHaveBeenCalledWith({
+      where: { id: 'payment-1', status: PaymentStatus.PENDING },
+      data: expect.objectContaining({
+        status: PaymentStatus.FAILED,
+        failureCode: 'PROVIDER_INITIATION_REJECTED',
+        failureMessage: 'Invalid phone number.',
+      }),
+    });
+    expect(completionTx.paymentProviderAttempt.updateMany).toHaveBeenCalledWith({
+      where: { id: 'attempt-1', status: PaymentStatus.PENDING },
+      data: expect.objectContaining({
+        status: PaymentStatus.FAILED,
+        failureCode: 'PROVIDER_INITIATION_REJECTED',
+        failureMessage: 'Invalid phone number.',
+      }),
+    });
+    expect(completionTx.idempotencyKey.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        responseJson: expect.objectContaining({
+          status: PaymentStatus.FAILED,
+          retryable: true,
+          failureCode: 'PROVIDER_INITIATION_REJECTED',
+        }),
+      }),
+    }));
   });
 
   it('keeps a payment processing when provider initiation outcome is unknown', async () => {

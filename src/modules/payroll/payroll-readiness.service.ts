@@ -57,8 +57,14 @@ export class PayrollReadinessService {
     if (period.status === PayrollPeriodStatus.DRAFT) {
       findings.push({ code: 'PERIOD_NOT_CALCULATED', message: 'The payroll period is still in DRAFT state.' });
     }
+    if (period.status !== PayrollPeriodStatus.DRAFT && (!period.calculatedBy || !period.calculatedAt)) {
+      findings.push({ code: 'CALCULATION_PROVENANCE_MISSING', message: 'Payroll calculation provenance is incomplete.' });
+    }
     if (period.status === PayrollPeriodStatus.CALCULATED && !period.approvedAt) {
       findings.push({ code: 'PERIOD_NOT_APPROVED', message: 'Payroll has been calculated but not approved.' });
+    }
+    if ((period.status === PayrollPeriodStatus.APPROVED || period.status === PayrollPeriodStatus.PAID) && (!period.approvedBy || !period.approvedAt)) {
+      findings.push({ code: 'APPROVAL_PROVENANCE_MISSING', message: 'Payroll approval provenance is incomplete.' });
     }
     if (period.status !== PayrollPeriodStatus.DRAFT && period.entries.length === 0) {
       findings.push({ code: 'NO_PAYROLL_ENTRIES', message: 'The payroll period has no staff entries.' });

@@ -42,7 +42,10 @@ describe('FinancialJournalService', () => {
 
   it('writes all balanced lines atomically', async () => {
     const create = jest.fn().mockImplementation(({ data }) => data);
-    const tx = { financialJournalEntry: { create, findMany: jest.fn().mockResolvedValue([]) } };
+    const tx = {
+      $executeRaw: jest.fn().mockResolvedValue([]),
+      financialJournalEntry: { create, findMany: jest.fn().mockResolvedValue([]) },
+    };
     const prisma = makePrisma();
     prisma.$transaction.mockImplementation(async (callback: (client: typeof tx) => unknown, options: unknown) => {
       expect(options).toEqual(expect.objectContaining({ isolationLevel: Prisma.TransactionIsolationLevel.Serializable }));
@@ -60,8 +63,14 @@ describe('FinancialJournalService', () => {
   });
 
   it('returns the existing journal transaction on a replay', async () => {
-    const existing = [{ id: 'line-1' }, { id: 'line-2' }];
-    const tx = { financialJournalEntry: { create: jest.fn(), findMany: jest.fn().mockResolvedValue(existing) } };
+    const existing = [
+      { id: 'line-1', accountCode: 'CASH', direction: 'DEBIT', amount: new Prisma.Decimal('100.00'), currency: 'GHS' },
+      { id: 'line-2', accountCode: 'FEES', direction: 'CREDIT', amount: new Prisma.Decimal('100.00'), currency: 'GHS' },
+    ];
+    const tx = {
+      $executeRaw: jest.fn().mockResolvedValue([]),
+      financialJournalEntry: { create: jest.fn(), findMany: jest.fn().mockResolvedValue(existing) },
+    };
     const prisma = makePrisma();
     prisma.$transaction.mockImplementation(async (callback: (client: typeof tx) => unknown) => callback(tx));
     const service = new FinancialJournalService(prisma);
@@ -83,5 +92,42 @@ describe('FinancialJournalService', () => {
       { accountCode: 'CASH', direction: 'DEBIT', amount: '100.00', referenceType: 'Payment', referenceId: 'p1' },
       { accountCode: 'FEES', direction: 'CREDIT', amount: '100.00', referenceType: 'Payment', referenceId: 'p1' },
     ])).rejects.toBeInstanceOf(ConflictException);
+  });  it('serializes journal replays and rejects a same-reference different-line mutation', async () => {
+    const existing = [
+      {
+        id: 'line-1',
+        accountCode: 'CASH',
+        direction: 'DEBIT',
+        amount: new Prisma.Decimal('100.00'),
+        currency: 'GHS',
+      },
+      {
+        id: 'line-2',
+        accountCode: 'FEES',
+        direction: 'CREDIT',
+        amount: new Prisma.Decimal('100.00'),
+        currency: 'GHS',
+      },
+    ];
+    const tx = {
+      $executeRaw: jest.fn().mockResolvedValue([]),
+      financialJournalEntry: {
+        create: jest.fn(),
+        findMany: jest.fn().mockResolvedValue(existing),
+      },
+    };
+    const prisma = makePrisma();
+    prisma.$transaction.mockImplementation(async (callback: (client: typeof tx) => unknown) => callback(tx));
+    const service = new FinancialJournalService(prisma);
+
+    await expect(service.recordBalancedEntry([
+      { accountCode: 'CASH', direction: 'DEBIT', amount: '90.00', referenceType: 'Payment', referenceId: 'p1' },
+      { accountCode: 'FEES', direction: 'CREDIT', amount: '90.00', referenceType: 'Payment', referenceId: 'p1' },
+    ])).rejects.toBeInstanceOf(ConflictException);
+
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
+    expect(tx.financialJournalEntry.create).not.toHaveBeenCalled();
   });
+
+
 });

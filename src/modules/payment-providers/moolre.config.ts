@@ -14,7 +14,7 @@
 export type MoolreEnv = 'sandbox' | 'production';
 
 export interface MoolreConfig {
-  /** 'LIVE' enables real network calls; anything else keeps the adapter in MOCK mode. */
+  /** 'LIVE' enables real network calls only after the explicit live-money confirmation gate is satisfied. */
   providerMode: 'MOCK' | 'LIVE';
   env: MoolreEnv;
   baseUrl: string;
@@ -41,9 +41,10 @@ export function loadMoolreConfig(env: NodeJS.ProcessEnv = process.env): MoolreCo
   const useProd = envName === 'production';
   const baseUrl = env.MOOLRE_BASE_URL ?? (useProd ? PROD_BASE_URL : SANDBOX_BASE_URL);
 
-  const credsPresent = Boolean(apiUser && apiKey);
+  const credsPresent = Boolean(apiUser && apiKey && apiPubKey && accountNumber && webhookSecret);
+  const liveConfirmed = env.MOOLRE_LIVE_CONFIRMED === 'true';
   const providerMode: MoolreConfig['providerMode'] =
-    env.MOOLRE_PROVIDER === 'LIVE' && credsPresent ? 'LIVE' : 'MOCK';
+    env.MOOLRE_PROVIDER === 'LIVE' && liveConfirmed && credsPresent ? 'LIVE' : 'MOCK';
 
   return {
     providerMode,

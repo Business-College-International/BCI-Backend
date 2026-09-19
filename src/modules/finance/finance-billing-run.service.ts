@@ -47,6 +47,8 @@ export class FinanceBillingRunService {
         const invoices: Array<{ id: string; invoiceNumber: string; studentId: string; amount: string }> = [];
         let concurrentSkipCount = 0;
         for (const candidate of prepared.candidates.filter((entry) => entry.status === 'READY')) {
+          await tx.$executeRaw`SELECT id FROM "Student" WHERE id = ${candidate.studentId} FOR UPDATE`;
+
           const existing = await tx.studentInvoice.findFirst({
             where: {
               studentId: candidate.studentId,

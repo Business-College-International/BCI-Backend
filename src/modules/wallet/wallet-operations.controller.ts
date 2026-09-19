@@ -7,6 +7,7 @@ import { RequirePermissions } from '../auth/permissions.decorator';
 import { PERMISSIONS } from '../auth/permission-catalog';
 import { WithdrawWalletDto } from './dto/withdraw-wallet.dto';
 import { WalletOperationsService } from './wallet-operations.service';
+import { ReverseWalletTransactionDto } from './dto/reverse-wallet-transaction.dto';
 
 type AuthenticatedRequest = Request & { user: { id: string; roles: RoleName[] } };
 
@@ -24,5 +25,24 @@ export class WalletOperationsController {
     @Req() request: AuthenticatedRequest,
   ) {
     return this.operations.withdraw(studentId, dto, request.user.id, request.user.roles, idempotencyKey);
+  }
+
+  @Post('students/:studentId/transactions/:transactionId/reverse')
+  @RequirePermissions(PERMISSIONS.WALLET_MANAGE)
+  reverse(
+    @Param('studentId', new ParseUUIDPipe()) studentId: string,
+    @Param('transactionId', new ParseUUIDPipe()) transactionId: string,
+    @Body() dto: ReverseWalletTransactionDto,
+    @Headers('idempotency-key') idempotencyKey: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.operations.reverse(
+      studentId,
+      transactionId,
+      dto,
+      request.user.id,
+      request.user.roles,
+      idempotencyKey,
+    );
   }
 }

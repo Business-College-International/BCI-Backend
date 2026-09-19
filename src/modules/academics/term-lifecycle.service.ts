@@ -14,6 +14,8 @@ export class TermLifecycleService {
 
     try {
       return await this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM "AcademicYear" WHERE id = ${academicYearId} FOR UPDATE`;
+
         const year = await tx.academicYear.findUnique({ where: { id: academicYearId } });
         if (!year) throw new NotFoundException('Academic year not found.');
         if (startsAt < year.startsAt || endsAt > year.endsAt) {
@@ -70,6 +72,14 @@ export class TermLifecycleService {
   async transitionTerm(id: string, status: TermStatus, actorUserId: string) {
     try {
       return await this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`
+          SELECT t.id
+          FROM "AcademicYear" ay
+          INNER JOIN "Term" t ON t."academicYearId" = ay.id
+          WHERE t.id = ${id}
+          FOR UPDATE OF ay, t
+        `;
+
         const term = await tx.term.findUnique({ where: { id } });
         if (!term) throw new NotFoundException('Term not found.');
 

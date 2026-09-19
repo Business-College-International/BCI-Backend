@@ -5,6 +5,7 @@ import { ApplicationsService } from './applications.service';
 type MockPrisma = { application: { findUnique: jest.Mock }; $transaction: jest.Mock };
 function makeTx(overrides: Record<string, unknown> = {}) {
   return {
+    $queryRaw: jest.fn().mockResolvedValue([]),
     academicYear: { findUnique: jest.fn() },
     term: { findUnique: jest.fn() },
     schoolClass: { findUnique: jest.fn() },
@@ -72,6 +73,22 @@ describe('ApplicationsService admission integrity', () => {
     await expect(new ApplicationsService(prisma as never).admit('application-1', { academicYearId: 'year-1', termId: 'term-1', classId: 'class-1' }, 'office-1')).rejects.toBeInstanceOf(ConflictException);
   });
 
+  it('locks the application and target class before checking admission capacity', async () => {
+    const tx = makeTx();
+    seedValidAdmission(tx);
+    const prisma = makePrisma(tx);
+    await new ApplicationsService(prisma as never).admit(
+      'application-1',
+      { academicYearId: 'year-1', termId: 'term-1', classId: 'class-1' },
+      'office-1',
+    );
+
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
+    expect(tx.enrolment.count).toHaveBeenCalledWith({
+      where: { classId: 'class-1', termId: 'term-1', status: 'ACTIVE' },
+    });
+  });
+
   it('creates the student, guardian link, enrolment, decision, and audit entry atomically', async () => {
     const tx = makeTx(); seedValidAdmission(tx);
     const prisma = makePrisma(tx);
@@ -92,6 +109,21 @@ describe('ApplicationsService admission integrity', () => {
 });
 
 describe('ApplicationsService review integrity', () => {
+  it('locks the application before applying a review transition', async () => {
+    const current = makeApplication();
+    const tx = makeTx();
+    tx.$queryRaw.mockResolvedValue([{ id: 'application-1' }]);
+    tx.application.findUnique.mockResolvedValue(current);
+    tx.application.updateMany.mockResolvedValue({ count: 0 });
+    const prisma = makePrisma(tx);
+
+    await expect(new ApplicationsService(prisma as never).review('application-1', 'REJECTED', 'Incomplete documents', 'office-1'))
+      .rejects.toEqual(expect.objectContaining({ message: 'Application changed while it was being reviewed.' }));
+
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+  });
+
+
   it('uses a conditional state transition so a concurrent review cannot overwrite a newer status', async () => {
     const current = makeApplication();
     const tx = makeTx();

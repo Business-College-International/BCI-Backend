@@ -82,6 +82,7 @@ describe('AttendanceService access and integrity', () => {
   it('rejects marking a student outside the session class and term', async () => {
     const prisma = makePrisma();
     const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'session-1' }]),
       attendanceSession: { findUnique: jest.fn() },
       staff: { findUnique: jest.fn() },
       teacherAssignment: { findFirst: jest.fn() },
@@ -109,6 +110,7 @@ describe('AttendanceService access and integrity', () => {
   it('blocks attendance changes after the term is closed', async () => {
     const prisma = makePrisma();
     const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'session-1' }]),
       attendanceSession: { findUnique: jest.fn() },
     };
     prisma.$transaction.mockImplementation(async (callback: (client: typeof tx) => unknown) => callback(tx));
@@ -125,6 +127,40 @@ describe('AttendanceService access and integrity', () => {
     await expect(service.markAttendance('session-1', {
       records: [{ studentId: 'student-1', status: AttendanceStatus.PRESENT }],
     }, 'teacher-user-1', [RoleName.TEACHER])).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('locks the attendance session before applying records', async () => {
+    const prisma = makePrisma();
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'session-1' }]),
+      attendanceSession: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'session-1',
+          classId: 'class-1',
+          termId: 'term-1',
+          subjectId: null,
+          term: { status: 'OPEN' },
+        }),
+      },
+      staff: { findUnique: jest.fn().mockResolvedValue({ personId: 'teacher-1' }) },
+      teacherAssignment: { findFirst: jest.fn().mockResolvedValue({ id: 'assignment-1' }) },
+      enrolment: { findMany: jest.fn().mockResolvedValue([{ studentId: 'student-1' }]) },
+      attendanceRecord: {
+        upsert: jest.fn().mockResolvedValue({ id: 'record-1' }),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      auditLog: { create: jest.fn().mockResolvedValue({}) },
+    };
+    prisma.$transaction.mockImplementation(async (callback: (client: typeof tx) => unknown) => callback(tx));
+
+    const service = new AttendanceService(prisma);
+
+    await service.markAttendance('session-1', {
+      records: [{ studentId: 'student-1', status: AttendanceStatus.PRESENT }],
+    }, 'teacher-user-1', [RoleName.TEACHER]);
+
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(tx.attendanceRecord.upsert).toHaveBeenCalledTimes(1);
   });
 
   it('denies a guardian who lacks academic visibility', async () => {

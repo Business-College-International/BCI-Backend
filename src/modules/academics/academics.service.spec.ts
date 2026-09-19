@@ -64,5 +64,59 @@ describe('AcademicsService class scope', () => {
 
     expect(result).toEqual([]);
     expect(prisma.schoolClass.findMany).not.toHaveBeenCalled();
+  });  it('serializes current academic year selection', async () => {
+    const tx = {
+      $executeRaw: jest.fn().mockResolvedValue([]),
+      academicYear: {
+        findUnique: jest.fn().mockResolvedValue({ id: 'year-2', isCurrent: false }),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        update: jest.fn().mockResolvedValue({ id: 'year-2', isCurrent: true }),
+      },
+      auditLog: { create: jest.fn().mockResolvedValue({}) },
+    };
+    const prisma = {
+      $transaction: jest.fn(async (callback: (value: typeof tx) => unknown) => callback(tx)),
+    };
+    const service = new AcademicsService(prisma as never);
+
+    await service.setCurrentAcademicYear('year-2', 'actor-1');
+
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
+    expect(tx.academicYear.updateMany).toHaveBeenCalledWith({ data: { isCurrent: false } });
+    expect(tx.academicYear.update).toHaveBeenCalledWith({
+      where: { id: 'year-2' },
+      data: { isCurrent: true },
+    });
   });
+
+  it('locks a class before validating capacity changes', async () => {
+    const tx = {
+      $executeRaw: jest.fn().mockResolvedValue([]),
+      schoolClass: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'class-1',
+          name: 'Business A',
+          division: null,
+          room: null,
+          capacity: 40,
+        }),
+        update: jest.fn().mockResolvedValue({ id: 'class-1', name: 'Business A', capacity: 45 }),
+      },
+      enrolment: { count: jest.fn().mockResolvedValue(20) },
+      auditLog: { create: jest.fn().mockResolvedValue({}) },
+    };
+    const prisma = {
+      $transaction: jest.fn(async (callback: (value: typeof tx) => unknown) => callback(tx)),
+    };
+    const service = new AcademicsService(prisma as never);
+
+    await service.updateClass('class-1', { capacity: 45 } as any, 'actor-1');
+
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
+    expect(tx.enrolment.count).toHaveBeenCalledWith({
+      where: { classId: 'class-1', status: 'ACTIVE' },
+    });
+  });
+
+
 });

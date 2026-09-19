@@ -3,6 +3,7 @@ import { AssessmentType, RoleName } from '@prisma/client';
 import { AssessmentsService } from './assessments.service';
 
 type MockTx = {
+  $queryRaw: jest.Mock;
   term: { findUnique: jest.Mock };
   schoolClass: { findUnique?: jest.Mock };
   subject: { findUnique: jest.Mock };
@@ -16,6 +17,7 @@ type MockTx = {
 
 function makeTx(): MockTx {
   return {
+    $queryRaw: jest.fn().mockResolvedValue([{ id: 'term-1' }]),
     term: { findUnique: jest.fn() },
     schoolClass: { findUnique: jest.fn() },
     subject: { findUnique: jest.fn() },
@@ -64,6 +66,7 @@ describe('AssessmentsService', () => {
 
   it('rejects a result for a student outside the teacher assigned class', async () => {
     const tx = makeTx();
+    tx.$queryRaw.mockResolvedValue([{ id: 'term-1' }]);
     tx.assessment.findUnique.mockResolvedValue({
       id: 'assessment-1',
       termId: 'term-1',
@@ -87,6 +90,7 @@ describe('AssessmentsService', () => {
 
   it('rejects a score above the assessment maximum', async () => {
     const tx = makeTx();
+    tx.$queryRaw.mockResolvedValue([{ id: 'term-1' }]);
     tx.assessment.findUnique.mockResolvedValue({
       id: 'assessment-1',
       termId: 'term-1',
@@ -103,11 +107,38 @@ describe('AssessmentsService', () => {
 
     await expect(service.enterResults('assessment-1', {
       results: [{ studentId: 'student-1', score: 51 }],
+    }, 'office-user', [RoleName.OFFICE])).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('locks the term before entering assessment results', async () => {
+    const tx = makeTx();
+    tx.assessment.findUnique
+      .mockResolvedValueOnce({ id: 'assessment-1', termId: 'term-1' })
+      .mockResolvedValueOnce({
+        id: 'assessment-1',
+        termId: 'term-1',
+        subjectId: 'subject-1',
+        maxScore: 50,
+        term: { status: 'OPEN' },
+      });
+    tx.$queryRaw.mockResolvedValue([{ id: 'term-1' }]);
+    tx.staff.findUnique.mockResolvedValue({ personId: 'staff-1' });
+    tx.teacherAssignment.findFirst.mockResolvedValue({ id: 'assignment-1' });
+    tx.enrolment.findMany.mockResolvedValue([{ studentId: 'student-1', classId: 'class-assigned' }]);
+    tx.teacherAssignment.findMany.mockResolvedValue([{ classId: 'class-assigned' }]);
+
+    const service = new AssessmentsService(makePrisma(tx));
+    await expect(service.enterResults('assessment-1', {
+      results: [{ studentId: 'student-1', score: 51 }],
     }, 'teacher-user', [RoleName.TEACHER])).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(tx.assessment.findUnique).toHaveBeenCalledTimes(2);
   });
 
   it('blocks result entry after the term is closed', async () => {
     const tx = makeTx();
+    tx.$queryRaw.mockResolvedValue([{ id: 'term-1' }]);
     tx.assessment.findUnique.mockResolvedValue({
       id: 'assessment-1',
       termId: 'term-1',

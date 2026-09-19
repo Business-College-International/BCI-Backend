@@ -9,6 +9,7 @@ type MockPrisma = {
 function makePrisma(student: any): MockPrisma {
   return {
     $transaction: jest.fn(async (callback: (tx: any) => unknown) => callback({
+      $queryRaw: jest.fn().mockResolvedValue([{ id: student.id }]),
       student: {
         findUnique: jest.fn().mockResolvedValue(student),
         update: jest.fn().mockResolvedValue({ id: student.id, status: StudentStatus.WITHDRAWN }),
@@ -38,6 +39,7 @@ describe('StudentsService withdrawal lifecycle', () => {
     const result = await service.withdraw('student-1', 'office-user-1', { reason: 'Family relocation' });
 
     expect(result.student.status).toBe(StudentStatus.WITHDRAWN);
+
     expect(result.enrolment.status).toBe('WITHDRAWN');
     expect(result.enrolment.exitReason).toBe('Family relocation');
   });
@@ -54,5 +56,29 @@ describe('StudentsService withdrawal lifecycle', () => {
     await expect(
       service.withdraw('student-2', 'office-user-1', { reason: 'Duplicate request' }),
     ).rejects.toBeInstanceOf(ConflictException);
+  });  it('locks the student row before evaluating withdrawal eligibility', async () => {
+    const student = {
+      id: 'student-3',
+      status: StudentStatus.WITHDRAWN,
+      enrolments: [],
+    };
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'student-3' }]),
+      student: { findUnique: jest.fn().mockResolvedValue(student), update: jest.fn() },
+      enrolment: { update: jest.fn() },
+      auditLog: { create: jest.fn() },
+    };
+    const prisma = {
+      $transaction: jest.fn(async (callback: (value: typeof tx) => unknown) => callback(tx)),
+    };
+    const service = new StudentsService(prisma as never);
+
+    await expect(service.withdraw('student-3', 'office-user-1', { reason: 'Duplicate request' }))
+      .rejects.toBeInstanceOf(ConflictException);
+
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(tx.student.findUnique).toHaveBeenCalled();
   });
+
+
 });

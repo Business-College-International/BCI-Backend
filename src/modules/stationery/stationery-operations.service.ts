@@ -37,11 +37,72 @@ export class StationeryOperationsService {
     });
   }
 
+  async attachSuccessfulPayment(orderId: string, paymentId: string, actorUserId: string, roles: RoleName[]) {
+    this.assertManagement(roles);
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT id FROM "Payment" WHERE id = ${paymentId} FOR UPDATE`;
+
+        const order = await tx.stationeryOrder.findUnique({
+          where: { id: orderId },
+          select: { id: true, orderNumber: true, studentId: true, guardianId: true, status: true, totalAmount: true, paymentId: true },
+        });
+        if (!order) throw new NotFoundException('Stationery order not found.');
+        if (order.status !== 'DRAFT') throw new BadRequestException('Only draft stationery orders can receive a payment.');
+        if (order.paymentId) throw new ConflictException('This stationery order is already linked to a payment.');
+
+        const payment = await tx.payment.findUnique({
+          where: { id: paymentId },
+          select: { id: true, studentId: true, guardianId: true, amount: true, currency: true, purpose: true, status: true, completedAt: true, provider: true, providerReference: true },
+        });
+        if (!payment) throw new NotFoundException('Payment not found.');
+        if (payment.status !== 'SUCCEEDED') throw new ConflictException('The payment must be successfully settled before it can be attached to a stationery order.');
+        if (payment.purpose !== 'STATIONERY') throw new ConflictException('The payment is not a stationery payment.');
+        if (payment.studentId !== order.studentId || payment.guardianId !== order.guardianId) {
+          throw new ConflictException('The payment does not belong to the guardian and ward on this order.');
+        }
+        if (!payment.amount.equals(order.totalAmount)) throw new ConflictException('The payment amount does not match the stationery order total.');
+
+        const existingOrder = await tx.stationeryOrder.findFirst({
+          where: { paymentId: payment.id, id: { not: order.id } },
+          select: { id: true, orderNumber: true },
+        });
+        if (existingOrder) throw new ConflictException('The payment is already linked to another stationery order.');
+
+        const updated = await tx.stationeryOrder.update({
+          where: { id: order.id },
+          data: { paymentId: payment.id, status: 'PAID' },
+        });
+
+        await tx.auditLog.create({
+          data: {
+            actorUserId,
+            action: 'RECONCILE',
+            entityType: 'StationeryOrder',
+            entityId: order.id,
+            beforeJson: { status: order.status, paymentId: null },
+            afterJson: { status: updated.status, paymentId: payment.id, providerReference: payment.providerReference },
+          },
+        });
+
+        return updated;
+      }, {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        maxWait: 5000,
+        timeout: 10000,
+      });
+    } catch (error) {
+      if ((error as { code?: string }).code === 'P2034') throw new ConflictException('Stationery payment attachment conflicted with another financial operation. Please retry.');
+      throw error;
+    }
+  }
+
   async markReadyForCollection(orderId: string, actorUserId: string, roles: RoleName[]) {
     this.assertManagement(roles);
 
     try {
       return await this.prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT id FROM "StationeryOrder" WHERE id = ${orderId} FOR UPDATE`;
         const order = await tx.stationeryOrder.findUnique({
           where: { id: orderId },
           include: {
@@ -136,6 +197,7 @@ export class StationeryOperationsService {
   async markCollected(orderId: string, actorUserId: string, roles: RoleName[]) {
     this.assertManagement(roles);
     return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "StationeryOrder" WHERE id = ${orderId} FOR UPDATE`;
       const order = await tx.stationeryOrder.findUnique({ where: { id: orderId } });
       if (!order) throw new NotFoundException('Stationery order not found.');
       if (order.status !== 'READY_FOR_COLLECTION') throw new BadRequestException('Only ready stationery orders can be collected.');
@@ -161,6 +223,7 @@ export class StationeryOperationsService {
   async cancelDraft(orderId: string, actorUserId: string, roles: RoleName[]) {
     this.assertManagement(roles);
     return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "StationeryOrder" WHERE id = ${orderId} FOR UPDATE`;
       const order = await tx.stationeryOrder.findUnique({ where: { id: orderId } });
       if (!order) throw new NotFoundException('Stationery order not found.');
       if (order.status !== 'DRAFT') throw new BadRequestException('Only draft stationery orders can be cancelled.');

@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { InvoiceStatus, PaymentStatus, Prisma } from '@prisma/client';
+import { randomBytes } from 'node:crypto';
+import { InvoiceStatus, PaymentStatus, Prisma, WalletTransactionDirection, WalletTransactionType } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
 import { NormalizedPaymentWebhook } from './payment-webhook.normalization';
 
@@ -38,21 +39,29 @@ export class PaymentWebhookProcessor {
               clientReference: normalized.clientReference!,
             };
 
-      const payment = await tx.payment.findFirst({
+      const paymentCandidate = await tx.payment.findFirst({
         where: paymentWhere,
-        include: {
-          attempts: true,
-          allocations: { select: { invoiceId: true } },
-        },
+        select: { id: true },
       });
 
-      if (!payment) {
+      if (!paymentCandidate) {
         await tx.providerWebhookEvent.update({
           where: { id: event.id },
           data: { processedAt: new Date(), processingError: 'No matching payment record was found.' },
         });
         return { applied: false, reason: 'payment-not-found' as const };
       }
+
+      await tx.$executeRaw`SELECT id FROM "Payment" WHERE id = ${paymentCandidate.id} FOR UPDATE`;
+
+      const payment = await tx.payment.findUnique({
+        where: { id: paymentCandidate.id },
+        include: {
+          attempts: true,
+          allocations: { select: { invoiceId: true } },
+        },
+      });
+      if (!payment) throw new NotFoundException('Payment not found after locking.');
 
       if (normalized.amount !== null && normalized.amount !== payment.amount.toFixed(2)) {
         await tx.providerWebhookEvent.update({
@@ -105,8 +114,129 @@ export class PaymentWebhookProcessor {
       }
 
       if (normalized.paymentStatus === PaymentStatus.SUCCEEDED) {
+        const receipt = await tx.receipt.upsert({
+          where: { paymentId: payment.id },
+          update: {},
+          create: {
+            paymentId: payment.id,
+            receiptNumber: nextReceiptNumber(),
+          },
+          select: { id: true, receiptNumber: true },
+        });
+
+        await tx.auditLog.create({
+          data: {
+            action: 'CREATE',
+            entityType: 'Receipt',
+            entityId: receipt.id,
+            afterJson: {
+              paymentId: payment.id,
+              receiptNumber: receipt.receiptNumber,
+              amount: payment.amount.toFixed(2),
+              currency: payment.currency,
+            },
+          },
+        });
+        if (payment.purpose === 'WALLET_TOP_UP') {
+          if (!payment.studentId) {
+            await tx.providerWebhookEvent.update({
+              where: { id: event.id },
+              data: { processedAt: new Date(), processingError: 'A wallet top-up payment must reference a student.' },
+            });
+            return { applied: false, reason: 'wallet-student-missing' as const };
+          }
+
+          const wallet = await tx.wallet.upsert({
+            where: { studentId: payment.studentId },
+            update: {},
+            create: { studentId: payment.studentId, currency: payment.currency },
+            select: { studentId: true, currency: true },
+          });
+
+          const existingWalletTransaction = await tx.walletTransaction.findUnique({
+            where: { paymentId: payment.id },
+            select: {
+              id: true,
+              walletId: true,
+              type: true,
+              direction: true,
+              amount: true,
+              providerReference: true,
+            },
+          });
+
+          let walletTransactionId = existingWalletTransaction?.id ?? null;
+          if (existingWalletTransaction) {
+            if (
+              existingWalletTransaction.walletId !== wallet.studentId ||
+              existingWalletTransaction.type !== WalletTransactionType.TOP_UP ||
+              existingWalletTransaction.direction !== WalletTransactionDirection.CREDIT ||
+              !existingWalletTransaction.amount.eq(payment.amount)
+            ) {
+              throw new Error('Existing wallet ledger entry does not match the verified top-up payment.');
+            }
+          } else {
+            const walletTransaction = await tx.walletTransaction.create({
+              data: {
+                walletId: wallet.studentId,
+                type: WalletTransactionType.TOP_UP,
+                direction: WalletTransactionDirection.CREDIT,
+                amount: payment.amount,
+                paymentId: payment.id,
+                providerReference: normalized.providerReference,
+                note: 'Verified provider wallet top-up',
+              },
+            });
+            walletTransactionId = walletTransaction.id;
+          }
+
+          await tx.auditLog.create({
+            data: {
+              action: 'RECONCILE',
+              entityType: 'WalletTransaction',
+              entityId: walletTransactionId!,
+              afterJson: {
+                paymentId: payment.id,
+                studentId: payment.studentId,
+                amount: payment.amount.toFixed(2),
+                currency: payment.currency,
+                providerReference: normalized.providerReference,
+                direction: WalletTransactionDirection.CREDIT,
+                type: WalletTransactionType.TOP_UP,
+                idempotent: Boolean(existingWalletTransaction),
+              },
+            },
+          });
+        }
+
+        if (payment.purpose === 'STATIONERY') {
+          await tx.$executeRaw`SELECT id FROM "StationeryOrder" WHERE "paymentId" = ${payment.id} FOR UPDATE`;
+          const order = await tx.stationeryOrder.findFirst({
+            where: { paymentId: payment.id },
+            select: { id: true, status: true, totalAmount: true, studentId: true, guardianId: true },
+          });
+          if (order) {
+            if (!order.totalAmount.eq(payment.amount) || order.studentId !== payment.studentId || order.guardianId !== payment.guardianId) {
+              throw new Error('Stationery order does not match the settled payment.');
+            }
+            if (order.status === 'DRAFT') {
+              await tx.stationeryOrder.update({ where: { id: order.id }, data: { status: 'PAID' } });
+              await tx.auditLog.create({
+                data: {
+                  action: 'RECONCILE',
+                  entityType: 'StationeryOrder',
+                  entityId: order.id,
+                  afterJson: { paymentId: payment.id, status: 'PAID' },
+                },
+              });
+            } else if (!['PAID', 'READY_FOR_COLLECTION', 'COLLECTED'].includes(order.status)) {
+              throw new Error('Stationery order ' + order.id + ' is in unexpected status ' + order.status + ' after payment settlement.');
+            }
+          }
+        }
         const invoiceIds = [...new Set(payment.allocations.map((allocation) => allocation.invoiceId))];
         for (const invoiceId of invoiceIds) {
+          await tx.$executeRaw`SELECT id FROM "StudentInvoice" WHERE id = ${invoiceId} FOR UPDATE`;
           const invoice = await tx.studentInvoice.findUnique({
             where: { id: invoiceId },
             include: {
@@ -139,4 +269,9 @@ export class PaymentWebhookProcessor {
       return { applied: true, paymentId: payment.id, status: normalized.paymentStatus };
     });
   }
+}
+
+function nextReceiptNumber() {
+  const year = new Date().getUTCFullYear();
+  return `BCI-RCPT-${year}-${randomBytes(6).toString('hex').toUpperCase()}`;
 }

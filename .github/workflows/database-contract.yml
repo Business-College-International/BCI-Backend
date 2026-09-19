@@ -1,11 +1,28 @@
 name: Backend Database Contract
 
 on:
+  push:
+    branches-ignore:
+      - main
+    paths:
+      - 'prisma/schema.prisma'
+      - 'prisma/seed.ts'
+      - 'prisma/**'
+      - 'prisma/migrations/**'
+      - 'package.json'
+      - 'package-lock.json'
   pull_request:
+    types:
+      - opened
+      - reopened
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: bci-pr-validation-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   database-contract:

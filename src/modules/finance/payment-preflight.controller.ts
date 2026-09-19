@@ -16,7 +16,7 @@ export class PaymentPreflightController {
   constructor(private readonly preflightService: PaymentPreflightService) {}
 
   @Post(':studentId/payment-preflight')
-  @RequirePermissions(PERMISSIONS.FINANCE_READ)
+  @RequirePermissions(PERMISSIONS.PAYMENTS_MANAGE)
   preflight(
     @Param('studentId') studentId: string,
     @Body() dto: PaymentPreflightDto,

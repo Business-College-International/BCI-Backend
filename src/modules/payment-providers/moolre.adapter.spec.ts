@@ -295,6 +295,16 @@ describe('moolre config gating', () => {
   it('stays in MOCK mode unless LIVE provider and credentials are set', () => {
     expect(loadMoolreConfig({}).providerMode).toBe('MOCK');
     expect(loadMoolreConfig({ MOOLRE_PROVIDER: 'LIVE' }).providerMode).toBe('MOCK');
-    expect(loadMoolreConfig({ MOOLRE_PROVIDER: 'LIVE', MOOLRE_API_USER: 'u', MOOLRE_API_KEY: 'k' }).providerMode).toBe('LIVE');
+    expect(loadMoolreConfig({ MOOLRE_PROVIDER: 'LIVE', MOOLRE_API_USER: 'u', MOOLRE_API_KEY: 'k', MOOLRE_API_PUBKEY: 'p', MOOLRE_ACCOUNT_NUMBER: 'ACC-1', MOOLRE_WEBHOOK_SECRET: WEBHOOK_SECRET }).providerMode).toBe('MOCK');
+    expect(loadMoolreConfig({ MOOLRE_PROVIDER: 'LIVE', MOOLRE_LIVE_CONFIRMED: 'true', MOOLRE_API_USER: 'u', MOOLRE_API_KEY: 'k', MOOLRE_API_PUBKEY: 'p', MOOLRE_ACCOUNT_NUMBER: 'ACC-1', MOOLRE_WEBHOOK_SECRET: WEBHOOK_SECRET }).providerMode).toBe('LIVE');
+    expect(loadMoolreConfig({
+      MOOLRE_PROVIDER: 'LIVE',
+      MOOLRE_LIVE_CONFIRMED: 'true',
+      MOOLRE_API_USER: 'u',
+      MOOLRE_API_KEY: 'k',
+      MOOLRE_API_PUBKEY: 'p',
+      MOOLRE_ACCOUNT_NUMBER: 'ACC-1',
+      MOOLRE_WEBHOOK_SECRET: WEBHOOK_SECRET,
+    }).providerMode).toBe('LIVE');
   });
 });

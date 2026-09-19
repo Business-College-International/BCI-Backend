@@ -5,6 +5,7 @@ import { AcademicsService } from './academics.service';
 describe('AcademicsService calendar controls', () => {
   it('opens a draft term and closes any other open term in the same year', async () => {
     const tx = {
+      $executeRaw: jest.fn().mockResolvedValue([]),
       term: {
         findUnique: jest.fn().mockResolvedValue({ id: 'term-2', academicYearId: 'year-1', status: TermStatus.DRAFT }),
         updateMany: jest.fn(),
@@ -22,6 +23,7 @@ describe('AcademicsService calendar controls', () => {
 
   it('rejects reopening a closed term', async () => {
     const tx = {
+      $executeRaw: jest.fn().mockResolvedValue([]),
       term: { findUnique: jest.fn().mockResolvedValue({ id: 'term-2', academicYearId: 'year-1', status: TermStatus.CLOSED }) },
       auditLog: { create: jest.fn() },
     };
@@ -33,6 +35,7 @@ describe('AcademicsService calendar controls', () => {
 
   it('rejects reducing a class below its active enrolment population', async () => {
     const tx = {
+      $executeRaw: jest.fn().mockResolvedValue([]),
       schoolClass: {
         findUnique: jest.fn().mockResolvedValue({ id: 'class-1', name: 'Business A', division: 'A', room: 'R1', capacity: 40 }),
         update: jest.fn(),

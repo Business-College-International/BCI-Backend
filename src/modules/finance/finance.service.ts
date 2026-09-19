@@ -102,6 +102,8 @@ export class FinanceService {
   async issueInvoice(dto: IssueInvoiceDto, actorUserId: string) {
     try {
       return await this.prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT id FROM "Student" WHERE id = ${dto.studentId} FOR UPDATE`;
+
         const [student, term, schedules] = await Promise.all([
           tx.student.findUnique({
             where: { id: dto.studentId },

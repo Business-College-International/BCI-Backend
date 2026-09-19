@@ -4,6 +4,7 @@ import { FinanceReceivablesService } from './finance-receivables.service';
 
 function makePrisma() {
   return {
+    $queryRaw: jest.fn().mockResolvedValue([]),
     studentInvoice: { findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
     auditLog: { create: jest.fn() },
     $transaction: jest.fn(),
@@ -48,6 +49,24 @@ describe('FinanceReceivablesService', () => {
     expect(prisma.studentInvoice.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 'invoice-1', status: InvoiceStatus.OPEN, allocations: { none: {} } },
     }));
+  });
+
+  it('locks the invoice before evaluating void eligibility', async () => {
+    const prisma = makePrisma();
+    prisma.$transaction.mockImplementation(async (callback: (tx: typeof prisma) => unknown) => callback(prisma));
+    prisma.$queryRaw.mockResolvedValue([{ id: 'invoice-1' }]);
+    prisma.studentInvoice.findUnique.mockResolvedValue({
+      id: 'invoice-1',
+      status: InvoiceStatus.OPEN,
+      allocations: [],
+    });
+    prisma.studentInvoice.updateMany.mockResolvedValue({ count: 1 });
+
+    const service = new FinanceReceivablesService(prisma as never);
+    await service.voidInvoice('invoice-1', { reason: 'Duplicate issuance' }, 'office-1', [RoleName.OFFICE]);
+
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(prisma.studentInvoice.findUnique).toHaveBeenCalled();
   });
 
   it('rejects a lost conditional void transition as a concurrency conflict', async () => {

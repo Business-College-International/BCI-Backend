@@ -5,6 +5,7 @@ import { StudentTerminalLifecycleService } from './student-terminal-lifecycle.se
 describe('StudentTerminalLifecycleService', () => {
   function makeTx(student: unknown) {
     return {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'student-1' }]),
       student: {
         findUnique: jest.fn().mockResolvedValue(student),
         update: jest.fn(),
@@ -26,6 +27,22 @@ describe('StudentTerminalLifecycleService', () => {
       }),
     } as never;
   }
+
+  it('locks the student before evaluating terminal lifecycle state', async () => {
+    const tx = makeTx({
+      id: 'student-1',
+      status: 'ACTIVE',
+      enrolments: [{ id: 'enrolment-1', status: 'ACTIVE', level: 'SHS3', term: { status: 'OPEN' } }],
+    });
+    tx.$queryRaw.mockResolvedValue([{ id: 'student-1' }]);
+    const service = new StudentTerminalLifecycleService(makePrisma(tx));
+
+    await expect(service.graduate('student-1', 'actor-1', 'DIRECTOR' as never))
+      .rejects.toBeInstanceOf(ConflictException);
+
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(tx.student.findUnique).toHaveBeenCalled();
+  });
 
   it('blocks graduation before the final term closes', async () => {
     const tx = makeTx({

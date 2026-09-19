@@ -1,18 +1,24 @@
 name: PostgreSQL Schema Contract
 
 on:
-  pull_request:
+  push:
+    branches-ignore:
+      - main
     paths:
       - 'prisma/schema.prisma'
       - 'prisma/seed.ts'
+      - 'prisma/**'
+      - 'prisma/migrations/**'
       - 'package.json'
       - 'package-lock.json'
-      - 'prisma/**'
-      - '.github/workflows/postgres-schema-contract.yml'
+  pull_request:
+    types:
+      - opened
+      - reopened
   workflow_dispatch:
 
 concurrency:
-  group: postgres-schema-contract-${{ github.ref }}
+  group: bci-pr-validation-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:

@@ -17,7 +17,7 @@ export class FinanceIntegrityService {
       throw new ForbiddenException(`Finance integrity access is restricted for user ${actorUserId}.`);
     }
 
-    const [invoices, payments, allocations] = await Promise.all([
+    const [invoices, payments, allocations, walletTransactions, stationeryOrders] = await Promise.all([
       this.prisma.studentInvoice.findMany({
         include: { lines: true },
         orderBy: { issuedAt: 'asc' },
@@ -25,6 +25,9 @@ export class FinanceIntegrityService {
       this.prisma.payment.findMany({
         select: {
           id: true,
+          studentId: true,
+          guardianId: true,
+          purpose: true,
           status: true,
           amount: true,
           completedAt: true,
@@ -42,6 +45,50 @@ export class FinanceIntegrityService {
           payment: { select: { id: true, status: true, amount: true, refunds: { select: { amount: true, status: true } } } },
           invoice: { select: { id: true, invoiceNumber: true } },
         },
+      }),
+      this.prisma.walletTransaction.findMany({
+        select: {
+          id: true,
+          walletId: true,
+          type: true,
+          direction: true,
+          amount: true,
+          paymentId: true,
+          reversalOfId: true,
+          payment: {
+            select: {
+              id: true,
+              studentId: true,
+              amount: true,
+              currency: true,
+              purpose: true,
+              status: true,
+            },
+          },
+          reversalOf: {
+            select: {
+              id: true,
+              walletId: true,
+              type: true,
+              direction: true,
+              amount: true,
+              paymentId: true,
+            },
+          },
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
+      this.prisma.stationeryOrder.findMany({
+        select: {
+          id: true,
+          orderNumber: true,
+          studentId: true,
+          guardianId: true,
+          status: true,
+          totalAmount: true,
+          paymentId: true,
+        },
+        orderBy: { orderedAt: 'asc' },
       }),
     ]);
 
@@ -158,6 +205,176 @@ export class FinanceIntegrityService {
         completedAt: payment.completedAt,
       }));
 
+    const orphanWalletPaymentLinks: Array<{ transactionId: string; paymentId: string }> = [];
+    const invalidWalletPaymentLinks: Array<{ transactionId: string; paymentId: string; reason: string }> = [];
+    const invalidWalletDirections: Array<{ transactionId: string; type: string; direction: string | null }> = [];
+    const invalidWalletReversals: Array<{ transactionId: string; reversalOfId: string | null; reason: string }> = [];
+    const walletBalanceByStudent = new Map<string, Prisma.Decimal>();
+
+    for (const transaction of walletTransactions) {
+      const current = walletBalanceByStudent.get(transaction.walletId) ?? new Prisma.Decimal(0);
+      if (transaction.direction === 'CREDIT') {
+        walletBalanceByStudent.set(transaction.walletId, current.plus(transaction.amount));
+      } else if (transaction.direction === 'DEBIT') {
+        walletBalanceByStudent.set(transaction.walletId, current.minus(transaction.amount));
+      }
+
+      if (transaction.paymentId) {
+        if (!transaction.payment) {
+          orphanWalletPaymentLinks.push({ transactionId: transaction.id, paymentId: transaction.paymentId });
+        } else {
+          if (transaction.payment.purpose !== 'WALLET_TOP_UP') {
+            invalidWalletPaymentLinks.push({
+              transactionId: transaction.id,
+              paymentId: transaction.payment.id,
+              reason: 'Wallet transaction references a non-wallet payment.',
+            });
+          }
+          if (
+            transaction.payment.studentId !== transaction.walletId ||
+            !transaction.amount.eq(transaction.payment.amount) ||
+            transaction.type !== 'TOP_UP'
+          ) {
+            invalidWalletPaymentLinks.push({
+              transactionId: transaction.id,
+              paymentId: transaction.payment.id,
+              reason: 'Wallet top-up does not match the linked payment student, amount, or transaction type.',
+            });
+          }
+          if (transaction.payment.status !== PaymentStatus.SUCCEEDED && transaction.payment.status !== PaymentStatus.REFUNDED) {
+            invalidWalletPaymentLinks.push({
+              transactionId: transaction.id,
+              paymentId: transaction.payment.id,
+              reason: 'Wallet credit is linked to a payment that has not reached a successful terminal state.',
+            });
+          }
+        }
+      }
+
+      if (
+        (transaction.type === 'TOP_UP' && transaction.direction !== 'CREDIT') ||
+        (transaction.type === 'WITHDRAWAL' && transaction.direction !== 'DEBIT') ||
+        (transaction.type === 'REVERSAL' && !transaction.direction)
+      ) {
+        invalidWalletDirections.push({
+          transactionId: transaction.id,
+          type: transaction.type,
+          direction: transaction.direction,
+        });
+      }
+
+      if (transaction.type === 'REVERSAL') {
+        if (!transaction.reversalOf) {
+          invalidWalletReversals.push({
+            transactionId: transaction.id,
+            reversalOfId: transaction.reversalOfId,
+            reason: 'Reversal does not identify an original transaction.',
+          });
+        } else if (
+          transaction.reversalOf.walletId !== transaction.walletId ||
+          transaction.reversalOf.type === 'REVERSAL' ||
+          !transaction.reversalOf.amount.eq(transaction.amount) ||
+          transaction.reversalOf.direction === transaction.direction
+        ) {
+          invalidWalletReversals.push({
+            transactionId: transaction.id,
+            reversalOfId: transaction.reversalOf.id,
+            reason: 'Reversal does not mirror the original wallet transaction.',
+          });
+        }
+      }
+    }
+
+    const walletPaymentIds = new Set(
+      walletTransactions.filter((transaction) => transaction.paymentId).map((transaction) => transaction.paymentId as string),
+    );
+    const successfulWalletTopUpsWithoutLedger = payments
+      .filter((payment) =>
+        payment.status === PaymentStatus.SUCCEEDED &&
+        payment.purpose === 'WALLET_TOP_UP' &&
+        !walletPaymentIds.has(payment.id),
+      )
+      .map((payment) => ({
+        paymentId: payment.id,
+        studentId: payment.studentId,
+        amount: payment.amount.toFixed(2),
+      }));
+
+    const negativeWalletBalances = Array.from(walletBalanceByStudent.entries())
+      .filter(([, balance]) => balance.lt(0))
+      .map(([studentId, balance]) => ({ studentId, balance: balance.toFixed(2) }));
+
+    const stationeryOrdersByPayment = new Map<string, typeof stationeryOrders>();
+    const successfulStationeryPaymentsWithoutOrder: Array<{
+      paymentId: string;
+      studentId: string | null;
+      amount: string;
+    }> = [];
+    const invalidStationeryPaymentLinks: Array<{
+      orderId: string;
+      orderNumber: string;
+      paymentId: string | null;
+      reason: string;
+    }> = [];
+
+    for (const order of stationeryOrders) {
+      if (order.paymentId) {
+        const existingOrders = stationeryOrdersByPayment.get(order.paymentId) ?? [];
+        existingOrders.push(order);
+        stationeryOrdersByPayment.set(order.paymentId, existingOrders);
+      }
+
+      if (['PAID', 'READY_FOR_COLLECTION', 'COLLECTED'].includes(order.status)) {
+        const payment = order.paymentId ? paymentById.get(order.paymentId) : null;
+        if (!payment) {
+          invalidStationeryPaymentLinks.push({
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            paymentId: order.paymentId,
+            reason: 'Fulfillable stationery order has no linked payment.',
+          });
+        } else if (
+          payment.status !== PaymentStatus.SUCCEEDED ||
+          payment.purpose !== 'STATIONERY' ||
+          payment.studentId !== order.studentId ||
+          payment.guardianId !== order.guardianId ||
+          !payment.amount.eq(order.totalAmount)
+        ) {
+          invalidStationeryPaymentLinks.push({
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            paymentId: payment.id,
+            reason: 'Stationery order does not match the linked successful STATIONERY payment identity or amount.',
+          });
+        }
+      }
+    }
+
+    for (const payment of payments) {
+      if (payment.purpose !== 'STATIONERY') continue;
+      const linkedOrders = stationeryOrdersByPayment.get(payment.id) ?? [];
+      if (
+        (payment.status === PaymentStatus.SUCCEEDED || payment.status === PaymentStatus.REFUNDED) &&
+        linkedOrders.length === 0
+      ) {
+        successfulStationeryPaymentsWithoutOrder.push({
+          paymentId: payment.id,
+          studentId: payment.studentId,
+          amount: payment.amount.toFixed(2),
+        });
+      }
+      if (linkedOrders.length > 1) {
+        for (const order of linkedOrders) {
+          invalidStationeryPaymentLinks.push({
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            paymentId: payment.id,
+            reason: 'A stationery payment is linked to more than one order.',
+          });
+        }
+      }
+    }
+
     const totalInvoiceAmount = invoices.reduce(
       (sum, invoice) => sum.plus(invoice.lines.reduce((lineSum, line) => lineSum.plus(line.amountDue), new Prisma.Decimal(0))),
       new Prisma.Decimal(0),
@@ -190,6 +407,14 @@ export class FinanceIntegrityService {
         overRefundedPayments,
         statusMismatches,
         succeededWithoutReceipt,
+        orphanWalletPaymentLinks,
+        invalidWalletPaymentLinks,
+        invalidWalletDirections,
+        invalidWalletReversals,
+        successfulWalletTopUpsWithoutLedger,
+        negativeWalletBalances,
+        successfulStationeryPaymentsWithoutOrder,
+        invalidStationeryPaymentLinks,
       },
       healthy:
         orphanAllocations.length === 0 &&
@@ -197,7 +422,15 @@ export class FinanceIntegrityService {
         overAllocatedPayments.length === 0 &&
         overRefundedPayments.length === 0 &&
         statusMismatches.length === 0 &&
-        succeededWithoutReceipt.length === 0,
+        succeededWithoutReceipt.length === 0 &&
+        orphanWalletPaymentLinks.length === 0 &&
+        invalidWalletPaymentLinks.length === 0 &&
+        invalidWalletDirections.length === 0 &&
+        invalidWalletReversals.length === 0 &&
+        successfulWalletTopUpsWithoutLedger.length === 0 &&
+        negativeWalletBalances.length === 0 &&
+        successfulStationeryPaymentsWithoutOrder.length === 0 &&
+        invalidStationeryPaymentLinks.length === 0,
     };
   }
 }

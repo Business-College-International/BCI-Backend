@@ -1,4 +1,4 @@
-import { ConflictException, ForbiddenException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { Prisma, PaymentPurpose, PaymentStatus, RoleName } from '@prisma/client';
 import { createHash, randomBytes } from 'node:crypto';
 import { PrismaService } from '../../prisma.service';
@@ -65,7 +65,60 @@ export class PaymentInitiationService {
         callbackUrl: dto.callbackUrl ?? '',
         customer: reservation.customer,
       });
-    } catch {
+    } catch (error) {
+      if (error instanceof BadRequestException) {
+        const message = error.message;
+        await this.prisma.$transaction(async (tx) => {
+          await tx.payment.updateMany({
+            where: { id: reservation.payment.id, status: PaymentStatus.PENDING },
+            data: {
+              status: PaymentStatus.FAILED,
+              provider: this.moolre.provider,
+              providerReference: null,
+              failureCode: 'PROVIDER_INITIATION_REJECTED',
+              failureMessage: message,
+              completedAt: new Date(),
+            },
+          });
+          await tx.paymentProviderAttempt.updateMany({
+            where: { id: reservation.attemptId, status: PaymentStatus.PENDING },
+            data: {
+              status: PaymentStatus.FAILED,
+              providerReference: null,
+              failureCode: 'PROVIDER_INITIATION_REJECTED',
+              failureMessage: message,
+              resolvedAt: new Date(),
+            },
+          });
+          await tx.idempotencyKey.update({
+            where: {
+              userId_key_operation: {
+                userId: actorUserId,
+                key: idempotencyKey.trim(),
+                operation: 'payments.initiate',
+              },
+            },
+            data: {
+              responseJson: {
+                paymentId: reservation.payment.id,
+                clientReference: reservation.payment.clientReference,
+                status: PaymentStatus.FAILED,
+                amount: reservation.payment.amount.toFixed(2),
+                currency: reservation.payment.currency,
+                provider: this.moolre.provider,
+                failureCode: 'PROVIDER_INITIATION_REJECTED',
+                failureMessage: message,
+                retryable: true,
+                allocations: reservation.allocations,
+              },
+              statusCode: error.getStatus(),
+              completedAt: new Date(),
+            },
+          });
+        });
+        throw error;
+      }
+
       await this.prisma.$transaction(async (tx) => {
         await tx.payment.updateMany({
           where: { id: reservation.payment.id, status: PaymentStatus.PENDING },

@@ -111,6 +111,22 @@ enum WalletTransactionType {
   WITHDRAWAL
   REVERSAL
 }
+enum WalletTransactionDirection {
+  CREDIT
+  DEBIT
+}
+enum WalletWithdrawalStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  DISPENSED
+  REVERSED
+}
+enum GradingPolicyStatus {
+  DRAFT
+  ACTIVE
+  RETIRED
+}
 enum ExpenseStatus {
   DRAFT
   SUBMITTED
@@ -267,9 +283,10 @@ model AcademicYear {
   isCurrent  Boolean  @default(false)
   createdAt  DateTime @default(now())
 
-  terms      Term[]
-  classes    SchoolClass[]
-  enrolments Enrolment[]
+  terms          Term[]
+  classes        SchoolClass[]
+  enrolments     Enrolment[]
+  gradingPolicies GradingPolicy[]
 }
 
 model Term {
@@ -456,6 +473,8 @@ model PayrollPeriod {
   startsAt      DateTime
   endsAt        DateTime
   status        PayrollPeriodStatus @default(DRAFT)
+  calculatedBy  String?
+  calculatedAt  DateTime?
   approvedBy    String?
   approvedAt    DateTime?
   paidAt        DateTime?
@@ -533,6 +552,7 @@ model Student {
   assessmentResults AssessmentResult[]
   invoices          StudentInvoice[]
   wallet            Wallet?
+  walletWithdrawals WalletWithdrawal[]
 }
 
 model StudentDocument {
@@ -666,6 +686,42 @@ model AssessmentResult {
   @@index([studentId, assessmentId])
 }
 
+model GradingPolicy {
+  id             String              @id @default(uuid())
+  version        String              @unique
+  name           String
+  academicYearId String
+  level          Level
+  programme      Programme?
+  status         GradingPolicyStatus @default(DRAFT)
+  createdAt      DateTime            @default(now())
+  publishedAt    DateTime?
+  publishedBy    String?
+
+  academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
+  bands        GradingBand[]
+
+  @@index([academicYearId, level, programme, status])
+}
+
+model GradingBand {
+  id             String  @id @default(uuid())
+  policyId       String
+  code           String
+  lowerInclusive Decimal @db.Decimal(5, 2)
+  upperExclusive Decimal? @db.Decimal(5, 2)
+  pass           Boolean
+  descriptor     String
+  points         Decimal? @db.Decimal(8, 2)
+  order          Int
+
+  policy GradingPolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+
+  @@unique([policyId, code])
+  @@unique([policyId, order])
+  @@index([policyId, lowerInclusive])
+}
+
 model FeeSchedule {
   id         String    @id @default(uuid())
   termId     String
@@ -732,10 +788,11 @@ model Payment {
   failureCode       String?
   failureMessage    String?
 
-  allocations PaymentAllocation[]
-  receipt     Receipt?
-  refunds     Refund[]
-  attempts    PaymentProviderAttempt[]
+  allocations        PaymentAllocation[]
+  receipt            Receipt?
+  refunds            Refund[]
+  attempts           PaymentProviderAttempt[]
+  walletTransactions WalletTransaction[]
 
   @@index([studentId, createdAt])
   @@index([guardianId, createdAt])
@@ -840,18 +897,51 @@ model Wallet {
 }
 
 model WalletTransaction {
-  id                String                @id @default(uuid())
+  id                String                    @id @default(uuid())
   walletId          String
   type              WalletTransactionType
-  amount            Decimal               @db.Decimal(12, 2)
+  direction         WalletTransactionDirection?
+  amount            Decimal                   @db.Decimal(12, 2)
+  paymentId         String?                   @unique
+  reversalOfId      String?                   @unique
+  withdrawalId      String?                   @unique
   providerReference String?
   processedBy       String?
-  createdAt         DateTime              @default(now())
+  createdAt         DateTime                  @default(now())
   note              String?
 
-  wallet Wallet @relation(fields: [walletId], references: [studentId], onDelete: Restrict)
+  wallet     Wallet           @relation(fields: [walletId], references: [studentId], onDelete: Restrict)
+  payment    Payment?         @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  withdrawal WalletWithdrawal? @relation("WalletWithdrawalTransaction", fields: [withdrawalId], references: [id], onDelete: Restrict)
+  reversalOf WalletTransaction? @relation("WalletTransactionReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
+  reversal   WalletTransaction? @relation("WalletTransactionReversal")
+
   @@index([walletId, createdAt])
   @@index([providerReference])
+  @@index([walletId, direction, createdAt])
+}
+
+model WalletWithdrawal {
+  id                 String                 @id @default(uuid())
+  studentId          String
+  amount             Decimal                @db.Decimal(12, 2)
+  reason             String
+  status             WalletWithdrawalStatus @default(REQUESTED)
+  requestedBy        String
+  approvedBy         String?
+  verifiedBy         String?
+  requestedAt        DateTime               @default(now())
+  approvedAt         DateTime?
+  verifiedAt         DateTime?
+  dispensedAt        DateTime?
+  reversedBy         String?
+  reversedAt         DateTime?
+
+  student         Student         @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  walletTransaction WalletTransaction? @relation("WalletWithdrawalTransaction")
+
+  @@index([studentId, requestedAt])
+  @@index([status, requestedAt])
 }
 
 model StationeryItem {

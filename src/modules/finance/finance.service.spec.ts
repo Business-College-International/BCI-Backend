@@ -19,6 +19,7 @@ describe('FinanceService', () => {
   it('rejects a fee item that does not match the student enrolment', async () => {
     const prisma = mockPrisma();
     const tx = {
+      $executeRaw: jest.fn().mockResolvedValue([]),
       student: { findUnique: jest.fn() },
       term: { findUnique: jest.fn() },
       feeSchedule: { findMany: jest.fn() },
@@ -46,6 +47,7 @@ describe('FinanceService', () => {
   it('blocks issuing a second open invoice for the same student and term', async () => {
     const prisma = mockPrisma();
     const tx = {
+      $executeRaw: jest.fn().mockResolvedValue([]),
       student: { findUnique: jest.fn() },
       term: { findUnique: jest.fn() },
       feeSchedule: { findMany: jest.fn() },
@@ -74,6 +76,7 @@ describe('FinanceService', () => {
   it('uses serializable isolation for invoice issuance', async () => {
     const prisma = mockPrisma();
     const tx = {
+      $executeRaw: jest.fn().mockResolvedValue([]),
       student: { findUnique: jest.fn() },
       term: { findUnique: jest.fn() },
       feeSchedule: { findMany: jest.fn() },
