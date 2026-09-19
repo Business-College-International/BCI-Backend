@@ -6,7 +6,7 @@ describe('ReportCardPublicationService', () => {
   function makePrisma() {
     const tx = {
       $executeRawUnsafe: jest.fn(),
-      reportCardPublication: { findUnique: jest.fn(), findFirst: jest.fn(), create: jest.fn(), update: jest.fn() },
+      reportCardPublication: { findUnique: jest.fn(), findFirst: jest.fn(), findMany: jest.fn(), create: jest.fn(), update: jest.fn() },
       auditLog: { create: jest.fn() },
     };
     const prisma = {
@@ -62,7 +62,7 @@ describe('ReportCardPublicationService', () => {
     const { prisma } = makePrisma();
     prisma.student.findUnique.mockResolvedValue({ id: 'student-1' });
     prisma.term.findUnique.mockResolvedValue({ id: 'term-1' });
-    prisma.reportCardPublication.findMany = jest.fn().mockResolvedValue([
+    prisma.reportCardPublication.findMany.mockResolvedValueOnce([
       { id: 'pub-2', publicationVersion: 2, status: ReportCardPublicationStatus.VOIDED },
       { id: 'pub-1', publicationVersion: 1, status: ReportCardPublicationStatus.PUBLISHED },
     ]);
@@ -83,7 +83,7 @@ describe('ReportCardPublicationService', () => {
 
   it('rejects publication history access for teachers and guardians', async () => {
     const { prisma } = makePrisma();
-    prisma.reportCardPublication.findMany = jest.fn();
+    prisma.reportCardPublication.findMany.mockImplementation(jest.fn());
 
     const reports = { getStudentTermSummary: jest.fn() };
     const readiness = { getClassReadiness: jest.fn() };
