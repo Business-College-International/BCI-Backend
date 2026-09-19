@@ -191,4 +191,26 @@ describe('PaymentInitiationService', () => {
     expect(reservationTx.payment.update).not.toHaveBeenCalled();
     expect(reservationTx.paymentProviderAttempt.update).not.toHaveBeenCalled();
   });
+  it('expires stale reservations before calculating new invoice availability', async () => {
+    const { service, reservationTx, completionTx } = makeService();
+
+    await service.initiate('student-1', dto, 'guardian-user', [RoleName.GUARDIAN], 'idem-expiry');
+
+    expect(reservationTx.paymentIntent.updateMany).toHaveBeenCalledWith({
+      where: {
+        invoiceId: { in: ['invoice-1'] },
+        status: { in: ['PENDING', 'PROCESSING'] },
+        expiresAt: expect.objectContaining({}),
+      },
+      data: {
+        status: 'EXPIRED',
+        completedAt: expect.any(Date),
+        failureCode: 'RESERVATION_EXPIRED',
+        failureMessage: 'Payment intent reservation expired before settlement.',
+      },
+    });
+    expect(reservationTx.paymentIntent.findMany).toHaveBeenCalled();
+    expect(completionTx.paymentIntent.updateMany).toHaveBeenCalled();
+  });
+
 });
