@@ -100,6 +100,15 @@ enum PaymentStatus {
   CANCELLED
   REFUNDED
 }
+enum PaymentIntentStatus {
+  PENDING
+  PROCESSING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+  EXPIRED
+  UNKNOWN
+}
 enum PaymentPurpose {
   FEE
   WALLET_TOP_UP
@@ -558,6 +567,7 @@ model Student {
   attendance        AttendanceRecord[]
   assessmentResults AssessmentResult[]
   invoices          StudentInvoice[]
+  paymentIntents    PaymentIntent[]
   wallet            Wallet?
   walletWithdrawals WalletWithdrawal[]
   reportCardPublications ReportCardPublication[]
@@ -787,7 +797,8 @@ model StudentInvoice {
   student     Student            @relation(fields: [studentId], references: [id], onDelete: Restrict)
   term        Term               @relation(fields: [termId], references: [id], onDelete: Restrict)
   lines       InvoiceLine[]
-  allocations PaymentAllocation[]
+  allocations      PaymentAllocation[]
+  paymentIntents   PaymentIntent[]
 
   @@index([studentId, termId, status])
 }
@@ -827,11 +838,42 @@ model Payment {
   refunds            Refund[]
   attempts           PaymentProviderAttempt[]
   walletTransactions WalletTransaction[]
+  paymentIntents     PaymentIntent[]
 
   @@index([studentId, createdAt])
   @@index([guardianId, createdAt])
   @@index([status, createdAt])
   @@index([provider, providerReference])
+}
+
+model PaymentIntent {
+  id                String              @id @default(uuid())
+  studentId         String
+  invoiceId         String
+  amount            Decimal             @db.Decimal(12, 2)
+  currency          String              @default("GHS")
+  status            PaymentIntentStatus @default(PENDING)
+  initiatedByUserId String
+  provider          String?
+  providerReference String?
+  clientReference   String?
+  idempotencyKey    String
+  paymentId         String?
+  expiresAt         DateTime
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  completedAt       DateTime?
+  failureCode       String?
+  failureMessage    String?
+
+  student Student        @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  invoice StudentInvoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  payment Payment?       @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+
+  @@index([invoiceId, status, expiresAt])
+  @@index([studentId, createdAt])
+  @@index([provider, providerReference])
+  @@index([paymentId])
 }
 
 model PaymentProviderAttempt {
