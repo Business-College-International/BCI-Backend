@@ -185,7 +185,7 @@ export class ReportCardCorrectionService {
             termId: request.termId,
             publicationVersion: (latest?.publicationVersion ?? 0) + 1,
             status: ReportCardPublicationStatus.PUBLISHED,
-            snapshotJson: request.replacementSnapshotJson,
+            snapshotJson: request.replacementSnapshotJson as Prisma.InputJsonValue,
             snapshotHash: request.replacementSnapshotHash,
             gradingPolicyVersionId: request.gradingPolicyVersionId,
             publishedAt: new Date(),
