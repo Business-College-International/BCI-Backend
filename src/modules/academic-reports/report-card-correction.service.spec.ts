@@ -1,5 +1,5 @@
 import { ConflictException, ForbiddenException } from '@nestjs/common';
-import { ReportCardCorrectionDecision, ReportCardPublicationStatus, RoleName, Prisma } from '@prisma/client';
+import { ReportCardCorrectionDecision, ReportCardPublicationStatus, RoleName } from '@prisma/client';
 import { ReportCardCorrectionService } from './report-card-correction.service';
 
 function makePrisma() {
@@ -34,7 +34,6 @@ describe('ReportCardCorrectionService', () => {
   it('rejects correction requests from non-teachers and non-reviewers', async () => {
     const { prisma } = makePrisma();
     const reports = { getStudentTermSummary: jest.fn() };
-    const publications = {};
     const service = new ReportCardCorrectionService(prisma as never, reports as never);
 
     await expect(service.request('student-1', 'term-1', 'Wrong mark', 'user-1', [RoleName.GUARDIAN]))
@@ -49,7 +48,6 @@ describe('ReportCardCorrectionService', () => {
       status: ReportCardPublicationStatus.PUBLISHED,
     });
     const reports = { getStudentTermSummary: jest.fn().mockResolvedValue(report) };
-    const publications = {};
     tx.reportCardCorrectionRequest.findFirst.mockResolvedValue(null);
     tx.reportCardCorrectionRequest.create.mockImplementation(async ({ data }: any) => ({ id: 'corr-1', ...data }));
     const service = new ReportCardCorrectionService(prisma as never, reports as never);
