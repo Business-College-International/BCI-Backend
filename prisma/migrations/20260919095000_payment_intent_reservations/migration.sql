@@ -36,6 +36,5 @@ ALTER TABLE "PaymentIntent"
 ALTER TABLE "PaymentIntent"
   ADD CONSTRAINT "PaymentIntent_paymentId_fkey" FOREIGN KEY ("paymentId") REFERENCES "Payment"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
-CREATE UNIQUE INDEX "PaymentIntent_active_idempotency_key"
-ON "PaymentIntent" ("initiatedByUserId", "idempotencyKey")
-WHERE "status" IN ('PENDING', 'PROCESSING');
+CREATE INDEX "PaymentIntent_initiator_idempotency_idx"
+ON "PaymentIntent" ("initiatedByUserId", "idempotencyKey");

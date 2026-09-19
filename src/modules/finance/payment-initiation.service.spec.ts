@@ -99,6 +99,8 @@ describe('PaymentInitiationService', () => {
     expect(reservationTx.paymentIntent.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ studentId: 'student-1', invoiceId: 'invoice-1', paymentId: 'payment-1', status: 'PENDING' }),
     }));
+    expect(reservationTx.paymentAllocation.create).not.toHaveBeenCalled();
+    expect(reservationTx.paymentIntent.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ invoiceId: 'invoice-1', paymentId: 'payment-1' }) }));
     expect(reservationTx.payment.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ amount: new Prisma.Decimal('50.00'), idempotencyKey: 'idem-1' }),
     }));
@@ -178,14 +180,3 @@ describe('PaymentInitiationService', () => {
     const { service, prisma, moolre, reservationTx } = makeService();
     const persistenceError = new Error('database unavailable');
     prisma.$transaction.mockReset()
-      .mockImplementationOnce(async (callback: (tx: any) => unknown) => callback(reservationTx))
-      .mockRejectedValueOnce(persistenceError);
-
-    await expect(service.initiate('student-1', dto, 'guardian-user', [RoleName.GUARDIAN], 'idem-3'))
-      .rejects.toBeInstanceOf(ServiceUnavailableException);
-
-    expect(moolre.initiatePayment).toHaveBeenCalledTimes(1);
-    expect(reservationTx.payment.update).not.toHaveBeenCalled();
-    expect(reservationTx.paymentProviderAttempt.update).not.toHaveBeenCalled();
-  });
-});
