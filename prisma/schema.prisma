@@ -311,6 +311,7 @@ model Term {
   assessments         Assessment[]
   enrolments          Enrolment[]
   studentInvoices     StudentInvoice[]
+  reportCardPublications ReportCardPublication[]
 
   @@unique([academicYearId, code])
   @@index([status, startsAt])
