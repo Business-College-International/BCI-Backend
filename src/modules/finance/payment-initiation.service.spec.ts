@@ -198,7 +198,7 @@ describe('PaymentInitiationService', () => {
 
     expect(reservationTx.paymentIntent.updateMany).toHaveBeenCalledWith({
       where: {
-        invoiceId: ['invoice-1'],
+        invoiceId: { in: ['invoice-1'] },
         status: { in: ['PENDING', 'PROCESSING'] },
         expiresAt: expect.objectContaining({}),
       },
