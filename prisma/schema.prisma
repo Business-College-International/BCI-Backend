@@ -127,6 +127,12 @@ enum GradingPolicyStatus {
   ACTIVE
   RETIRED
 }
+enum ReportCardPublicationStatus {
+  DRAFT
+  READY_FOR_PUBLICATION
+  PUBLISHED
+  VOIDED
+}
 enum ExpenseStatus {
   DRAFT
   SUBMITTED
@@ -305,6 +311,7 @@ model Term {
   assessments         Assessment[]
   enrolments          Enrolment[]
   studentInvoices     StudentInvoice[]
+  reportCardPublications ReportCardPublication[]
 
   @@unique([academicYearId, code])
   @@index([status, startsAt])
@@ -553,6 +560,7 @@ model Student {
   invoices          StudentInvoice[]
   wallet            Wallet?
   walletWithdrawals WalletWithdrawal[]
+  reportCardPublications ReportCardPublication[]
 }
 
 model StudentDocument {
@@ -700,6 +708,7 @@ model GradingPolicy {
 
   academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
   bands        GradingBand[]
+  reportCardPublications ReportCardPublication[]
 
   @@index([academicYearId, level, programme, status])
 }
@@ -720,6 +729,31 @@ model GradingBand {
   @@unique([policyId, code])
   @@unique([policyId, order])
   @@index([policyId, lowerInclusive])
+}
+
+model ReportCardPublication {
+  id                     String                      @id @default(uuid())
+  studentId              String
+  termId                 String
+  publicationVersion     Int
+  status                 ReportCardPublicationStatus @default(DRAFT)
+  snapshotJson           Json
+  snapshotHash           String
+  gradingPolicyVersionId String?
+  publishedAt            DateTime?
+  publishedBy            String?
+  voidedAt               DateTime?
+  voidedBy               String?
+  voidReason             String?
+  createdAt              DateTime                    @default(now())
+
+  student       Student        @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  term          Term           @relation(fields: [termId], references: [id], onDelete: Restrict)
+  gradingPolicy GradingPolicy? @relation(fields: [gradingPolicyVersionId], references: [id], onDelete: Restrict)
+
+  @@unique([studentId, termId, publicationVersion])
+  @@index([studentId, termId, status])
+  @@index([snapshotHash])
 }
 
 model FeeSchedule {

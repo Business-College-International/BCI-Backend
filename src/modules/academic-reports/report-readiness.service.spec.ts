@@ -8,6 +8,7 @@ describe('ReportReadinessService', () => {
       enrolment: { findMany: jest.fn() },
       assessment: { findMany: jest.fn() },
       assessmentResult: { findMany: jest.fn() },
+      gradingPolicy: { findFirst: jest.fn().mockResolvedValue(null) },
       staff: { findUnique: jest.fn() },
       teacherAssignment: { findFirst: jest.fn() },
       ...overrides,
@@ -26,6 +27,22 @@ describe('ReportReadinessService', () => {
     await expect(service.getClassReadiness('class-1', 'term-1', 'actor-1', ['OFFICE'] as never)).resolves.toMatchObject({
       totals: { readyStudents: 0, blockedStudents: 1 },
       students: [{ ready: false, reasons: ['TERM_NOT_CLOSED', 'GRADING_POLICY_REQUIRED'] }],
+    });
+  });
+
+  it('does not block readiness when an active grading policy covers the class scope', async () => {
+    const { service, prisma } = makeService();
+    prisma.term.findUnique.mockResolvedValue({ id: 'term-1', name: 'Term 1', status: 'CLOSED', academicYearId: 'year-1' });
+    prisma.schoolClass.findUnique.mockResolvedValue({ id: 'class-1', name: 'Business A', academicYearId: 'year-1', level: 'SHS1', programme: 'BUSINESS' });
+    prisma.enrolment.findMany.mockResolvedValue([{ studentId: 'student-1', student: { admissionNumber: 'BCI-1', firstName: 'Kojo', lastName: 'Owusu' } }]);
+    prisma.assessment.findMany.mockResolvedValue([{ id: 'assessment-1', title: 'Test 1', type: 'TEST', subjectId: 'subject-1', weight: 100, maxScore: 100, subject: { code: 'ACC', name: 'Accounting' } }]);
+    prisma.assessmentResult.findMany.mockResolvedValue([{ studentId: 'student-1', assessmentId: 'assessment-1' }]);
+    prisma.gradingPolicy.findFirst.mockResolvedValue({ id: 'policy-1', version: 'GRADING-2026-TEST' });
+
+    await expect(service.getClassReadiness('class-1', 'term-1', 'actor-1', ['OFFICE'] as never)).resolves.toMatchObject({
+      policy: { gradingConfigured: true, policyVersionId: 'policy-1', policyVersion: 'GRADING-2026-TEST', reason: null },
+      totals: { readyStudents: 1, blockedStudents: 0 },
+      students: [{ ready: true, reasons: [] }],
     });
   });
 
