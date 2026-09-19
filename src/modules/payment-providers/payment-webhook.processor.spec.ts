@@ -125,6 +125,7 @@ describe('PaymentWebhookProcessor', () => {
             status: PaymentStatus.PROCESSING,
             attempts: [],
             allocations: [],
+            paymentIntents: [],
           }),
         },
         providerWebhookEvent: {
@@ -155,6 +156,7 @@ describe('PaymentWebhookProcessor', () => {
             status: PaymentStatus.SUCCEEDED,
             attempts: [],
             allocations: [],
+            paymentIntents: [],
           }),
         },
         providerWebhookEvent: {
@@ -182,6 +184,7 @@ describe('PaymentWebhookProcessor', () => {
       status: PaymentStatus.PROCESSING,
       attempts: [{ id: 'attempt-1', provider: 'TEST', providerReference: 'provider-ref-1' }],
       allocations: [],
+      paymentIntents: [],
     });
 
     const prisma = {
@@ -258,6 +261,7 @@ describe('PaymentWebhookProcessor', () => {
             status: PaymentStatus.SUCCEEDED,
             attempts: [],
             allocations: [],
+            paymentIntents: [],
           }),
           update: jest.fn().mockResolvedValue({}),
         },
@@ -295,7 +299,7 @@ describe('PaymentWebhookProcessor', () => {
           findUnique: jest.fn().mockResolvedValue({
             id: 'payment-stationery-lock', amount: new Prisma.Decimal('25.00'), currency: 'GHS',
             purpose: 'STATIONERY', studentId: 'student-1', guardianId: 'guardian-1', status: PaymentStatus.PROCESSING,
-            attempts: [], allocations: [],
+            attempts: [], allocations: [], paymentIntents: [],
           }),
           update: jest.fn().mockResolvedValue({}),
         },
@@ -340,7 +344,7 @@ describe('PaymentWebhookProcessor', () => {
           findUnique: jest.fn().mockResolvedValue({
             id: 'payment-stationery-1', amount: new Prisma.Decimal('25.00'), currency: 'GHS',
             purpose: 'STATIONERY', studentId: 'student-1', guardianId: 'guardian-1', status: PaymentStatus.PROCESSING,
-            attempts: [], allocations: [],
+            attempts: [], allocations: [], paymentIntents: [],
           }),
           update: jest.fn().mockResolvedValue({}),
         },
