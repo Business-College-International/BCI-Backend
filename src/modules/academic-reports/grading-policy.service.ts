@@ -33,38 +33,40 @@ export class GradingPolicyService {
     });
     if (!academicYear) throw new NotFoundException('Academic year not found.');
 
-    const policy = await this.prisma.gradingPolicy.create({
-      data: {
-        version: this.nextVersion(),
-        name,
-        academicYearId: dto.academicYearId,
-        level: dto.level,
-        programme: dto.programme ?? null,
-        status: GradingPolicyStatus.DRAFT,
-        bands: { create: bands },
-      },
-      include: { bands: { orderBy: { order: 'asc' } } },
-    });
-
-    await this.prisma.auditLog.create({
-      data: {
-        actorUserId,
-        action: 'CREATE',
-        entityType: 'GradingPolicy',
-        entityId: policy.id,
-        afterJson: {
-          version: policy.version,
-          name: policy.name,
-          academicYearId: policy.academicYearId,
-          level: policy.level,
-          programme: policy.programme,
-          status: policy.status,
-          bandCount: policy.bands.length,
+    return this.prisma.$transaction(async (tx) => {
+      const policy = await tx.gradingPolicy.create({
+        data: {
+          version: this.nextVersion(),
+          name,
+          academicYearId: dto.academicYearId,
+          level: dto.level,
+          programme: dto.programme ?? null,
+          status: GradingPolicyStatus.DRAFT,
+          bands: { create: bands },
         },
-      },
-    });
+        include: { bands: { orderBy: { order: 'asc' } } },
+      });
 
-    return policy;
+      await tx.auditLog.create({
+        data: {
+          actorUserId,
+          action: 'CREATE',
+          entityType: 'GradingPolicy',
+          entityId: policy.id,
+          afterJson: {
+            version: policy.version,
+            name: policy.name,
+            academicYearId: policy.academicYearId,
+            level: policy.level,
+            programme: policy.programme,
+            status: policy.status,
+            bandCount: policy.bands.length,
+          },
+        },
+      });
+
+      return policy;
+    });
   }
 
   async update(id: string, actorUserId: string, dto: UpdateGradingPolicyDto) {

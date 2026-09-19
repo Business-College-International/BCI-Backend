@@ -81,6 +81,33 @@ describe('GradingPolicyService', () => {
     expect(prisma.auditLog.create).toHaveBeenCalled();
   });
 
+  it('creates policy and audit atomically', async () => {
+    const { prisma } = makePrisma();
+    prisma.academicYear.findUnique.mockResolvedValue({ id: 'year-1' });
+    prisma.gradingPolicy.create.mockResolvedValue({
+      id: 'policy-atomic',
+      version: 'GRADING-2026-ATOMIC',
+      name: 'Atomic policy',
+      academicYearId: 'year-1',
+      level: 'P1',
+      programme: null,
+      status: GradingPolicyStatus.DRAFT,
+      bands: validBands,
+    });
+
+    const service = new GradingPolicyService(prisma as never);
+    await service.create('user-1', {
+      academicYearId: 'year-1',
+      name: 'Atomic policy',
+      level: 'P1',
+      programme: null,
+      bands: validBands,
+    } as never);
+
+    expect(prisma.$transaction).toHaveBeenCalled();
+    expect(prisma.auditLog.create).toHaveBeenCalled();
+  });
+
   it('refuses to publish when another active policy occupies the same scope', async () => {
     const { prisma, tx } = makePrisma();
     tx.gradingPolicy.findUnique.mockResolvedValue({
