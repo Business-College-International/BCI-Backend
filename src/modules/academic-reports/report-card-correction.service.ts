@@ -37,6 +37,10 @@ export class ReportCardCorrectionService {
       throw new ConflictException('A correction request requires a report with an assigned grading-policy version.');
     }
 
+    if (report.grading.policyVersionId !== current.gradingPolicyVersionId) {
+      throw new ConflictException('The active grading-policy version differs from the published report. A policy correction must be resolved before requesting an assessment correction.');
+    }
+
     const replacementSnapshot = this.snapshotFromReport(report);
     const replacementSnapshotHash = hashSnapshot(replacementSnapshot);
 
@@ -128,6 +132,7 @@ export class ReportCardCorrectionService {
         gradingPolicyVersionId: true,
         decision: true,
         reason: true,
+        targetPublication: { select: { id: true, status: true, snapshotHash: true, gradingPolicyVersionId: true } },
       },
     });
     if (!report) throw new NotFoundException('Report-card correction request not found.');
@@ -143,9 +148,14 @@ export class ReportCardCorrectionService {
       throw new ConflictException('The correction request no longer matches the current grading-policy version. Recalculate and submit a new request.');
     }
 
+    if (authoritativeReport.grading.policyVersionId !== report.gradingPolicyVersionId) {
+      throw new ConflictException('The correction would change the grading-policy version. Recalculate under the published policy version.');
+    }
+
     const authoritativeSnapshot = this.snapshotFromReport(authoritativeReport);
-    if (hashSnapshot(authoritativeSnapshot) !== report.replacementSnapshotHash) {
-      throw new ConflictException('The proposed correction snapshot is stale. Recalculate the report and submit a new correction request.');
+    const authoritativeSnapshotHash = hashSnapshot(authoritativeSnapshot);
+    if (authoritativeSnapshotHash === report.targetPublication.snapshotHash) {
+      throw new ConflictException('The correction request has no effective assessment change to publish.');
     }
 
     try {
