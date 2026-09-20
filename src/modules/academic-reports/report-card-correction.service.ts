@@ -67,6 +67,7 @@ export class ReportCardCorrectionService {
           replacementSnapshotHash,
           gradingPolicyVersionId: report.grading.policyVersionId,
           reason: trimmedReason,
+          decision: ReportCardCorrectionDecision.PENDING,
           requestedBy: actorUserId,
         },
       });
