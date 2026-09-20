@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service';
+import { AccountingModule } from '../accounting/accounting.module';
 import { AuthModule } from '../auth/auth.module';
 import { PaymentProvidersModule } from '../payment-providers/payment-providers.module';
 import { FinanceController } from './finance.controller';
@@ -18,14 +19,13 @@ import { FinanceIntegrityController } from './finance-integrity.controller';
 import { FinanceIntegrityService } from './finance-integrity.service';
 import { RefundController } from './refund.controller';
 import { RefundService } from './refund.service';
-import { FinancialJournalService } from './financial-journal.service';
 import { FinanceStatementController } from './finance-statement.controller';
 import { FinanceStatementService } from './finance-statement.service';
 import { FinanceBillingRunController } from './finance-billing-run.controller';
 import { FinanceBillingRunService } from './finance-billing-run.service';
 
 @Module({
-  imports: [AuthModule, PaymentProvidersModule],
+  imports: [AuthModule, PaymentProvidersModule, AccountingModule],
   controllers: [
     FinanceController,
     FinanceExpenseController,
@@ -47,11 +47,10 @@ import { FinanceBillingRunService } from './finance-billing-run.service';
     PaymentOtpService,
     FinanceIntegrityService,
     RefundService,
-    FinancialJournalService,
     FinanceStatementService,
     FinanceBillingRunService,
     PrismaService,
   ],
-  exports: [RefundService, FinancialJournalService, PaymentInitiationService, PaymentOtpService],
+  exports: [AccountingModule, RefundService, PaymentInitiationService, PaymentOtpService],
 })
 export class FinanceModule {}
