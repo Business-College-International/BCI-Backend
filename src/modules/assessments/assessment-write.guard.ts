@@ -6,7 +6,7 @@ export class AssessmentWriteGuard implements CanActivate {
   constructor(private readonly prisma: PrismaService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const request = context.switchToHttp().getRequest<{ params?: { assessmentId?: string } }>();
+    const request = context.switchToHttp().getRequest<{ params?: { assessmentId?: string }; body?: unknown }>();
     const assessmentId = request.params?.assessmentId;
     if (!assessmentId) throw new BadRequestException('Assessment ID is required.');
 
