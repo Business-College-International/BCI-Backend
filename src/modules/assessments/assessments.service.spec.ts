@@ -31,8 +31,8 @@ function makeTx(): MockTx {
     enrolment: { findFirst: jest.fn(), findMany: jest.fn() },
     assessmentResult: { upsert: jest.fn(), findMany: jest.fn() },
     auditLog: { create: jest.fn() },
-    reportCardPublication: { findMany: jest.fn() },
-    reportCardCorrectionRequest: { findMany: jest.fn() },
+    reportCardPublication: { findMany: jest.fn().mockResolvedValue([]) },
+    reportCardCorrectionRequest: { findMany: jest.fn().mockResolvedValue([]) },
   };
 }
 
@@ -47,6 +47,7 @@ function makePrisma(tx: MockTx): any {
     staff: tx.staff,
     enrolment: tx.enrolment,
     teacherAssignment: tx.teacherAssignment,
+    assessment: { findMany: tx.assessment.findMany },
     assessmentResult: { findMany: jest.fn() },
     reportCardPublication: tx.reportCardPublication,
     reportCardCorrectionRequest: tx.reportCardCorrectionRequest,
@@ -164,7 +165,7 @@ describe('AssessmentsService', () => {
 
     await expect(service.enterResults('assessment-1', {
       results: [{ studentId: 'student-1', score: 40 }],
-    }, 'teacher-user', [RoleName.TEACHER])).rejects.toThrow('Closed-term assessment changes require');
+    }, 'teacher-user', [RoleName.TEACHER])).rejects.toThrow('Assessment results cannot be changed after the term is closed');
     expect(tx.assessmentResult.upsert).not.toHaveBeenCalled();
   });
 
