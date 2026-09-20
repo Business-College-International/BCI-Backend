@@ -303,9 +303,9 @@ export class AcademicReportsService {
   ) {
     if (roles.some((role) => PRIVILEGED_ROLES.has(role))) return { allowed: true, guardianRestricted: false };
 
-    const guardian = await this.prisma.guardian.findUnique({ where: { userId: actorUserId }, select: { personId: true } });
+    const guardian = await db.guardian.findUnique({ where: { userId: actorUserId }, select: { personId: true } });
     if (guardian) {
-      const link = await this.prisma.guardianStudent.findUnique({
+      const link = await db.guardianStudent.findUnique({
         where: { guardianId_studentId: { guardianId: guardian.personId, studentId } },
         select: { canViewAcademic: true },
       });
@@ -313,13 +313,13 @@ export class AcademicReportsService {
     }
 
     if (roles.includes(RoleName.TEACHER)) {
-      const staff = await this.prisma.staff.findUnique({ where: { userId: actorUserId }, select: { personId: true } });
-      const enrolment = await this.prisma.enrolment.findFirst({
+      const staff = await db.staff.findUnique({ where: { userId: actorUserId }, select: { personId: true } });
+      const enrolment = await db.enrolment.findFirst({
         where: { studentId, termId, status: 'ACTIVE' },
         select: { classId: true },
       });
       if (staff && enrolment) {
-        const assignment = await this.prisma.teacherAssignment.findFirst({
+        const assignment = await db.teacherAssignment.findFirst({
           where: { staffId: staff.personId, classId: enrolment.classId, termId },
           select: { id: true },
         });
