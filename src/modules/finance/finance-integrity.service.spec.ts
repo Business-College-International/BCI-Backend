@@ -8,9 +8,9 @@ function decimal(value: string) {
 
 function mockPrisma() {
   return {
-    studentInvoice: { findMany: jest.fn() },
-    payment: { findMany: jest.fn() },
-    paymentAllocation: { findMany: jest.fn() },
+    studentInvoice: { findMany: jest.fn().mockResolvedValue([]) },
+    payment: { findMany: jest.fn().mockResolvedValue([]) },
+    paymentAllocation: { findMany: jest.fn().mockResolvedValue([]) },
     walletTransaction: { findMany: jest.fn().mockResolvedValue([]) },
     stationeryOrder: { findMany: jest.fn().mockResolvedValue([]) },
     financialJournalEntry: { findMany: jest.fn().mockResolvedValue([]) },
