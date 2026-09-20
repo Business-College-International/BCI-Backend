@@ -111,6 +111,94 @@ export class AssessmentsService {
     return rows.map(({ student }) => student);
   }
 
+  async listAssignedAssessments(
+    classId: string,
+    termId: string,
+    subjectId: string,
+    actorUserId: string,
+    roles: RoleName[],
+  ) {
+    const [term, schoolClass, subject] = await Promise.all([
+      this.prisma.term.findUnique({
+        where: { id: termId },
+        select: { id: true, academicYearId: true },
+      }),
+      this.prisma.schoolClass.findUnique({
+        where: { id: classId },
+        select: { id: true, level: true, academicYearId: true },
+      }),
+      this.prisma.subject.findUnique({
+        where: { id: subjectId },
+        select: { id: true, level: true },
+      }),
+    ]);
+
+    if (!term || !schoolClass || !subject) {
+      throw new NotFoundException('Term, class, or subject not found.');
+    }
+    if (schoolClass.academicYearId !== term.academicYearId) {
+      throw new BadRequestException(
+        'The class does not belong to the selected term academic year.',
+      );
+    }
+    if (subject.level !== schoolClass.level) {
+      throw new BadRequestException(
+        'The subject level does not match the class level.',
+      );
+    }
+
+    await this.assertTeacherAssignmentForClass(
+      this.prisma,
+      actorUserId,
+      roles,
+      termId,
+      subjectId,
+      classId,
+    );
+
+    const assessments = await this.prisma.assessment.findMany({
+      where: { termId, subjectId },
+      include: {
+        results: {
+          where: {
+            student: {
+              enrolments: {
+                some: { classId, termId, status: 'ACTIVE' },
+              },
+            },
+          },
+          select: {
+            id: true,
+            studentId: true,
+            score: true,
+            remark: true,
+            enteredAt: true,
+            enteredBy: true,
+          },
+          orderBy: { studentId: 'asc' },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    return assessments.map((assessment) => ({
+      id: assessment.id,
+      title: assessment.title,
+      type: assessment.type,
+      maxScore: assessment.maxScore.toString(),
+      weight: assessment.weight?.toString() ?? null,
+      createdAt: assessment.createdAt,
+      results: assessment.results.map((result) => ({
+        id: result.id,
+        studentId: result.studentId,
+        score: result.score.toString(),
+        remark: result.remark,
+        enteredAt: result.enteredAt,
+        enteredBy: result.enteredBy,
+      })),
+    }));
+  }
+
   async enterResults(assessmentId: string, dto: EnterAssessmentResultsDto, actorUserId: string, roles: RoleName[]) {
     return this.prisma.$transaction(async (tx) => {
       const assessmentTerm = await tx.assessment.findUnique({
@@ -126,14 +214,15 @@ export class AssessmentsService {
         select: { id: true, termId: true, subjectId: true, maxScore: true, term: { select: { status: true } } },
       });
       if (!assessment) throw new NotFoundException('Assessment not found.');
-      if (assessment.term.status === 'CLOSED') {
-        throw new BadRequestException('Assessment results cannot be entered or changed for a closed term.');
-      }
-
       await this.assertTeacherAssignment(tx, actorUserId, roles, assessment.termId, assessment.subjectId);
 
       const ids = dto.results.map((result) => result.studentId);
       if (new Set(ids).size !== ids.length) throw new BadRequestException('Duplicate student IDs are not allowed.');
+
+      const correctionScope = await this.assertPublishedReportEditAccess(tx, ids, assessment.termId);
+      if (assessment.term.status === 'CLOSED' && correctionScope.publishedCount !== ids.length) {
+        throw new BadRequestException('Assessment results cannot be changed after the term is closed unless every changed student is covered by a pending report-card correction request.');
+      }
 
       const eligible = await this.findEligibleStudents(tx, ids, assessment.termId, assessment.subjectId, actorUserId, roles);
       const invalid = ids.filter((id) => !eligible.has(id));
@@ -261,6 +350,58 @@ export class AssessmentsService {
         subject: result.assessment.subject,
       },
     }));
+  }
+
+  private async assertPublishedReportEditAccess(
+    tx: Prisma.TransactionClient,
+    studentIds: string[],
+    termId: string,
+  ) {
+    if (studentIds.length === 0) {
+      return { publishedCount: 0 };
+    }
+
+    await tx.$executeRaw`
+      SELECT id
+      FROM "ReportCardPublication"
+      WHERE "termId" = ${termId}
+        AND status = 'PUBLISHED'
+        AND "studentId" IN (${Prisma.join(studentIds)})
+      FOR UPDATE
+    `;
+
+    const published = await tx.reportCardPublication.findMany({
+      where: {
+        studentId: { in: studentIds },
+        termId,
+        status: 'PUBLISHED',
+      },
+      select: { id: true, studentId: true },
+    });
+
+    if (published.length === 0) {
+      return { publishedCount: 0 };
+    }
+
+    const pending = await tx.reportCardCorrectionRequest.findMany({
+      where: {
+        studentId: { in: published.map((row) => row.studentId) },
+        termId,
+        targetPublicationId: { in: published.map((row) => row.id) },
+        decision: 'PENDING',
+      },
+      select: { studentId: true },
+    });
+
+    const permitted = new Set(pending.map((row) => row.studentId));
+    const blocked = published.filter((row) => !permitted.has(row.studentId));
+    if (blocked.length > 0) {
+      throw new BadRequestException(
+        'Published report cards are read-only. Submit a correction request before changing their assessment results.',
+      );
+    }
+
+    return { publishedCount: published.length };
   }
 
   private async assertTeacherAssignment(
