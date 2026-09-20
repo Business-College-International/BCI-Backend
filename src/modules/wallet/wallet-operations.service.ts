@@ -9,10 +9,14 @@ import { Prisma, RoleName, WalletTransactionDirection, WalletTransactionType, Wa
 import { createHash } from 'node:crypto';
 import { PrismaService } from '../../prisma.service';
 import { WithdrawWalletDto } from './dto/withdraw-wallet.dto';
+import { FinancialJournalService } from '../accounting/financial-journal.service';
 
 @Injectable()
 export class WalletOperationsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly journal: FinancialJournalService,
+  ) {}
 
   async withdraw(
     studentId: string,
@@ -133,6 +137,27 @@ export class WalletOperationsService {
             note: dto.note?.trim() || 'Office wallet withdrawal',
           },
         });
+
+        await this.journal.recordBalancedEntry([
+          {
+            accountCode: 'WALLET_LIABILITY',
+            direction: 'DEBIT',
+            amount: transaction.amount.toFixed(2),
+            currency: wallet.currency,
+            referenceType: 'WalletTransaction',
+            referenceId: transaction.id,
+            description: 'Wallet withdrawal ' + transaction.id,
+          },
+          {
+            accountCode: 'CASH',
+            direction: 'CREDIT',
+            amount: transaction.amount.toFixed(2),
+            currency: wallet.currency,
+            referenceType: 'WalletTransaction',
+            referenceId: transaction.id,
+            description: 'Wallet withdrawal ' + transaction.id,
+          },
+        ], actorUserId, tx);
 
         const response = {
           transactionId: transaction.id,
@@ -312,6 +337,50 @@ export class WalletOperationsService {
             note: reason,
           },
         });
+
+        const journalLines = reversalDirection === WalletTransactionDirection.CREDIT
+          ? [
+              {
+                accountCode: 'CASH',
+                direction: 'DEBIT' as const,
+                amount: transaction.amount.toFixed(2),
+                currency: wallet.currency,
+                referenceType: 'WalletTransaction',
+                referenceId: transaction.id,
+                description: 'Wallet reversal ' + transaction.id,
+              },
+              {
+                accountCode: 'WALLET_LIABILITY',
+                direction: 'CREDIT' as const,
+                amount: transaction.amount.toFixed(2),
+                currency: wallet.currency,
+                referenceType: 'WalletTransaction',
+                referenceId: transaction.id,
+                description: 'Wallet reversal ' + transaction.id,
+              },
+            ]
+          : [
+              {
+                accountCode: 'WALLET_LIABILITY',
+                direction: 'DEBIT' as const,
+                amount: transaction.amount.toFixed(2),
+                currency: wallet.currency,
+                referenceType: 'WalletTransaction',
+                referenceId: transaction.id,
+                description: 'Wallet reversal ' + transaction.id,
+              },
+              {
+                accountCode: 'CASH',
+                direction: 'CREDIT' as const,
+                amount: transaction.amount.toFixed(2),
+                currency: wallet.currency,
+                referenceType: 'WalletTransaction',
+                referenceId: transaction.id,
+                description: 'Wallet reversal ' + transaction.id,
+              },
+            ];
+
+        await this.journal.recordBalancedEntry(journalLines, actorUserId, tx);
 
         if (original.withdrawalId) {
           await tx.walletWithdrawal.update({
