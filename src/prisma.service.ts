@@ -1,6 +1,6 @@
 import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
-import { getRequestId } from './common/request-context/request-context';
+import { injectAuditRequestId } from './common/request-context/request-context';
 
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleDestroy {
@@ -8,12 +8,7 @@ export class PrismaService extends PrismaClient implements OnModuleDestroy {
     super();
 
     this.$use(async (params, next) => {
-      if (params.model === 'AuditLog' && params.action === 'create' && params.args?.data) {
-        const requestId = getRequestId();
-        if (requestId && !params.args.data.requestId) {
-          params.args.data.requestId = requestId;
-        }
-      }
+      injectAuditRequestId(params);
       return next(params);
     });
   }
