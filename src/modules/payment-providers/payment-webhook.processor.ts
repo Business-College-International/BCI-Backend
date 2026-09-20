@@ -91,6 +91,47 @@ export class PaymentWebhookProcessor {
         return { applied: false, reason: 'terminal-status-protected' as const };
       }
 
+      if (normalized.paymentStatus === PaymentStatus.SUCCEEDED) {
+        if (payment.purpose === 'FEE') {
+          const intentTotal = payment.paymentIntents.reduce((sum, intent) => sum.plus(intent.amount), new Prisma.Decimal(0));
+          if (payment.paymentIntents.length === 0 || !intentTotal.eq(payment.amount)) {
+            await tx.providerWebhookEvent.update({
+              where: { id: event.id },
+              data: { processedAt: new Date(), processingError: 'Verified fee payment does not match its payment-intent reservation total.' },
+            });
+            return { applied: false, reason: 'payment-intent-total-mismatch' as const };
+          }
+        }
+        if (payment.purpose === 'WALLET_TOP_UP' && !payment.studentId) {
+          await tx.providerWebhookEvent.update({
+            where: { id: event.id },
+            data: { processedAt: new Date(), processingError: 'A wallet top-up payment must reference a student.' },
+          });
+          return { applied: false, reason: 'wallet-student-missing' as const };
+        }
+        if (payment.purpose === 'STATIONERY') {
+          await tx.$executeRaw`SELECT id FROM "StationeryOrder" WHERE "paymentId" = ${payment.id} FOR UPDATE`;
+          const order = await tx.stationeryOrder.findFirst({
+            where: { paymentId: payment.id },
+            select: { id: true, status: true, totalAmount: true, studentId: true, guardianId: true },
+          });
+          if (!order) {
+            await tx.providerWebhookEvent.update({
+              where: { id: event.id },
+              data: { processedAt: new Date(), processingError: 'A stationery payment must reference a matching stationery order.' },
+            });
+            return { applied: false, reason: 'stationery-order-missing' as const };
+          }
+          if (!order.totalAmount.eq(payment.amount) || order.studentId !== payment.studentId || order.guardianId !== payment.guardianId) {
+            await tx.providerWebhookEvent.update({
+              where: { id: event.id },
+              data: { processedAt: new Date(), processingError: 'Stationery order does not match the verified payment.' },
+            });
+            return { applied: false, reason: 'stationery-order-mismatch' as const };
+          }
+        }
+      }
+
       await tx.payment.update({
         where: { id: payment.id },
         data: {
