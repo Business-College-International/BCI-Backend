@@ -13,6 +13,7 @@ function mockPrisma() {
     paymentAllocation: { findMany: jest.fn() },
     walletTransaction: { findMany: jest.fn().mockResolvedValue([]) },
     stationeryOrder: { findMany: jest.fn().mockResolvedValue([]) },
+    financialJournalEntry: { findMany: jest.fn().mockResolvedValue([]) },
   } as any;
 }
 
@@ -215,6 +216,82 @@ describe('FinanceIntegrityService', () => {
     expect(report.findings.invalidStationeryPaymentLinks).toHaveLength(1);
     expect(report.healthy).toBe(false);
   });
+
+  it('flags successful payments and refunds that are missing journal postings', async () => {
+    const prisma = mockPrisma();
+    prisma.studentInvoice.findMany.mockResolvedValue([]);
+    prisma.payment.findMany.mockResolvedValue([
+      {
+        id: 'payment-1',
+        studentId: 'student-1',
+        guardianId: 'guardian-1',
+        purpose: 'FEE',
+        status: PaymentStatus.SUCCEEDED,
+        amount: decimal('100.00'),
+        completedAt: new Date(),
+        receipt: { id: 'receipt-1', receiptNumber: 'R-1' },
+        refunds: [{ id: 'refund-1', amount: decimal('25.00'), status: PaymentStatus.SUCCEEDED }],
+      },
+    ]);
+    prisma.paymentAllocation.findMany.mockResolvedValue([]);
+    prisma.financialJournalEntry.findMany.mockResolvedValue([]);
+
+    const service = new FinanceIntegrityService(prisma);
+    const report = await service.getIntegrityReport('accountant-user', [RoleName.ACCOUNTANT]);
+
+    expect(report.findings.missingPaymentJournalEntries).toEqual([
+      { paymentId: 'payment-1', purpose: 'FEE', amount: '100.00' },
+    ]);
+    expect(report.findings.missingRefundJournalEntries).toEqual([
+      { paymentId: 'payment-1', refundId: 'refund-1', amount: '25.00' },
+    ]);
+    expect(report.healthy).toBe(false);
+  });
+
+  it('flags unbalanced journal references', async () => {
+    const prisma = mockPrisma();
+    prisma.studentInvoice.findMany.mockResolvedValue([]);
+    prisma.payment.findMany.mockResolvedValue([]);
+    prisma.paymentAllocation.findMany.mockResolvedValue([]);
+    prisma.financialJournalEntry.findMany.mockResolvedValue([
+      {
+        id: 'journal-1',
+        entryNumber: 'JNL-1',
+        accountCode: 'CASH',
+        direction: 'DEBIT',
+        amount: decimal('100.00'),
+        currency: 'GHS',
+        referenceType: 'Payment',
+        referenceId: 'payment-1',
+        transactionAt: new Date(),
+      },
+      {
+        id: 'journal-2',
+        entryNumber: 'JNL-1',
+        accountCode: 'FEES',
+        direction: 'CREDIT',
+        amount: decimal('90.00'),
+        currency: 'GHS',
+        referenceType: 'Payment',
+        referenceId: 'payment-1',
+        transactionAt: new Date(),
+      },
+    ]);
+
+    const service = new FinanceIntegrityService(prisma);
+    const report = await service.getIntegrityReport('accountant-user', [RoleName.ACCOUNTANT]);
+
+    expect(report.findings.unbalancedJournalTransactions).toEqual([
+      expect.objectContaining({
+        referenceType: 'Payment',
+        referenceId: 'payment-1',
+        debit: '100.00',
+        credit: '90.00',
+      }),
+    ]);
+    expect(report.healthy).toBe(false);
+  });
+
 
 
 });
