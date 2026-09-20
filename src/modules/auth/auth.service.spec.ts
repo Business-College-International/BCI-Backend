@@ -1,5 +1,4 @@
 import { UnauthorizedException } from '@nestjs/common';
-import { UserStatus, RoleName } from '@prisma/client';
 import { RoleName, UserStatus } from '@prisma/client';
 import { AuthService } from './auth.service';
 
