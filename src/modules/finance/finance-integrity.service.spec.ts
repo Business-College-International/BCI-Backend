@@ -178,6 +178,7 @@ describe('FinanceIntegrityService', () => {
       stationeryOrder: { findMany: jest.fn().mockResolvedValue([]) },
       financialJournalEntry: { findMany: jest.fn().mockResolvedValue([]) },
     };
+    const service = new FinanceIntegrityService(prisma as never);
     const report = await service.getIntegrityReport('accountant-user', [RoleName.ACCOUNTANT]);
 
     expect(report.findings.successfulStationeryPaymentsWithoutOrder).toEqual([
