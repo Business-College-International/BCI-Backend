@@ -17,7 +17,7 @@ export class FinanceIntegrityService {
       throw new ForbiddenException(`Finance integrity access is restricted for user ${actorUserId}.`);
     }
 
-    const [invoices, payments, allocations, walletTransactions, stationeryOrders] = await Promise.all([
+    const [invoices, payments, allocations, walletTransactions, stationeryOrders, journalEntries] = await Promise.all([
       this.prisma.studentInvoice.findMany({
         include: { lines: true },
         orderBy: { issuedAt: 'asc' },
@@ -32,7 +32,7 @@ export class FinanceIntegrityService {
           amount: true,
           completedAt: true,
           receipt: { select: { id: true, receiptNumber: true } },
-          refunds: { select: { amount: true, status: true } },
+          refunds: { select: { id: true, amount: true, status: true } },
         },
         orderBy: { createdAt: 'asc' },
       }),
@@ -89,6 +89,23 @@ export class FinanceIntegrityService {
           paymentId: true,
         },
         orderBy: { orderedAt: 'asc' },
+      }),
+      this.prisma.financialJournalEntry.findMany({
+        where: {
+          referenceType: { in: ['Payment', 'Refund'] },
+        },
+        select: {
+          id: true,
+          entryNumber: true,
+          accountCode: true,
+          direction: true,
+          amount: true,
+          currency: true,
+          referenceType: true,
+          referenceId: true,
+          transactionAt: true,
+        },
+        orderBy: [{ referenceType: 'asc' }, { referenceId: 'asc' }, { transactionAt: 'asc' }],
       }),
     ]);
 
@@ -162,6 +179,78 @@ export class FinanceIntegrityService {
         });
       }
     }
+
+    const journalByReference = new Map<string, typeof journalEntries>();
+    for (const entry of journalEntries) {
+      const key = `${entry.referenceType}:${entry.referenceId}`;
+      const existing = journalByReference.get(key) ?? [];
+      existing.push(entry);
+      journalByReference.set(key, existing);
+    }
+
+    const unbalancedJournalTransactions: Array<{
+      referenceType: string;
+      referenceId: string;
+      entryNumbers: string[];
+      debit: string;
+      credit: string;
+    }> = [];
+
+    for (const [key, entries] of journalByReference) {
+      const debit = entries
+        .filter((entry) => entry.direction === 'DEBIT')
+        .reduce((sum, entry) => sum.plus(entry.amount), new Prisma.Decimal(0));
+      const credit = entries
+        .filter((entry) => entry.direction === 'CREDIT')
+        .reduce((sum, entry) => sum.plus(entry.amount), new Prisma.Decimal(0));
+      const entryNumbers = [...new Set(entries.map((entry) => entry.entryNumber))];
+      const currencies = new Set(entries.map((entry) => entry.currency));
+
+      if (
+        entries.length < 2 ||
+        !debit.eq(credit) ||
+        currencies.size !== 1 ||
+        entryNumbers.length !== 1
+      ) {
+        const separator = key.indexOf(':');
+        unbalancedJournalTransactions.push({
+          referenceType: key.slice(0, separator),
+          referenceId: key.slice(separator + 1),
+          entryNumbers,
+          debit: debit.toFixed(2),
+          credit: credit.toFixed(2),
+        });
+      }
+    }
+
+    const missingPaymentJournalEntries = payments
+      .filter((payment) =>
+        (payment.status === PaymentStatus.SUCCEEDED || payment.status === PaymentStatus.REFUNDED) &&
+        ['FEE', 'WALLET_TOP_UP', 'STATIONERY'].includes(payment.purpose),
+      )
+      .filter((payment) => !journalByReference.has(`Payment:${payment.id}`))
+      .map((payment) => ({
+        paymentId: payment.id,
+        purpose: payment.purpose,
+        amount: payment.amount.toFixed(2),
+      }));
+
+    const missingRefundJournalEntries = payments
+      .flatMap((payment) =>
+        payment.refunds
+          .filter((refund) => refund.status === PaymentStatus.SUCCEEDED)
+          .map((refund) => ({
+            paymentId: payment.id,
+            refundId: refund.id,
+            amount: refund.amount,
+          })),
+      )
+      .filter((refund) => !journalByReference.has(`Refund:${refund.refundId}`))
+      .map((refund) => ({
+        paymentId: refund.paymentId,
+        refundId: refund.refundId,
+        amount: refund.amount.toFixed(2),
+      }));
 
     const statusMismatches = [] as Array<{
       invoiceId: string;
@@ -415,6 +504,9 @@ export class FinanceIntegrityService {
         negativeWalletBalances,
         successfulStationeryPaymentsWithoutOrder,
         invalidStationeryPaymentLinks,
+        unbalancedJournalTransactions,
+        missingPaymentJournalEntries,
+        missingRefundJournalEntries,
       },
       healthy:
         orphanAllocations.length === 0 &&
@@ -430,7 +522,10 @@ export class FinanceIntegrityService {
         successfulWalletTopUpsWithoutLedger.length === 0 &&
         negativeWalletBalances.length === 0 &&
         successfulStationeryPaymentsWithoutOrder.length === 0 &&
-        invalidStationeryPaymentLinks.length === 0,
+        invalidStationeryPaymentLinks.length === 0 &&
+        unbalancedJournalTransactions.length === 0 &&
+        missingPaymentJournalEntries.length === 0 &&
+        missingRefundJournalEntries.length === 0,
     };
   }
 }
