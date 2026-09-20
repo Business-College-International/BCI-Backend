@@ -131,4 +131,49 @@ describe('TermLifecycleService', () => {
     await expect(service.transitionTerm('term-1', 'OPEN' as any, 'actor-1'))
       .rejects.toBeInstanceOf(ConflictException);
   });
+
+  it('checks closure readiness inside the closure transaction', async () => {
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'term-1' }]),
+      term: {
+        findUnique: jest.fn().mockResolvedValue({ id: 'term-1', academicYearId: 'year-1', status: 'OPEN' }),
+        updateMany: jest.fn(),
+        update: jest.fn().mockResolvedValue({ id: 'term-1', status: 'CLOSED' }),
+      },
+      auditLog: { create: jest.fn().mockResolvedValue({}) },
+    };
+    const readiness = { assertReadyForClosure: jest.fn().mockResolvedValue({ blockers: [] }) };
+    const prisma = makePrisma(tx);
+    const service = new TermLifecycleService(prisma as never, readiness as never);
+
+    await expect(service.transitionTerm('term-1', 'CLOSED' as any, 'actor-1')).resolves.toMatchObject({ status: 'CLOSED' });
+
+    expect(readiness.assertReadyForClosure).toHaveBeenCalledWith(tx, 'term-1');
+    expect(tx.term.update).toHaveBeenCalledWith({ where: { id: 'term-1' }, data: { status: 'CLOSED' } });
+  });
+
+  it('blocks term closure when readiness reports unresolved blockers', async () => {
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'term-1' }]),
+      term: {
+        findUnique: jest.fn().mockResolvedValue({ id: 'term-1', academicYearId: 'year-1', status: 'OPEN' }),
+        updateMany: jest.fn(),
+        update: jest.fn(),
+      },
+      auditLog: { create: jest.fn() },
+    };
+    const readiness = {
+      assertReadyForClosure: jest.fn().mockRejectedValue(
+        new BadRequestException('Term is not ready for closure: MISSING_ASSESSMENT_RESULTS'),
+      ),
+    };
+    const prisma = makePrisma(tx);
+    const service = new TermLifecycleService(prisma as never, readiness as never);
+
+    await expect(service.transitionTerm('term-1', 'CLOSED' as any, 'actor-1'))
+      .rejects.toThrow('MISSING_ASSESSMENT_RESULTS');
+    expect(tx.term.update).not.toHaveBeenCalled();
+    expect(tx.auditLog.create).not.toHaveBeenCalled();
+  });
+
 });
