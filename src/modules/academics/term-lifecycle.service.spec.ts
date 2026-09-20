@@ -115,7 +115,7 @@ describe('TermLifecycleService', () => {
 
   it('translates a serialization conflict during term creation into a retryable conflict', async () => {
     const prisma = makePrisma({}, { code: 'P2034' });
-    const service = new TermLifecycleService(prisma as never);
+    const service = new TermLifecycleService(prisma as never, makeReadiness() as never);
     await expect(
       service.createTerm('year-1', { code: 'T1', name: 'Term 1', startsAt: '2026-09-01', endsAt: '2026-12-01', status: 'OPEN' } as any, 'actor-1'),
     ).rejects.toBeInstanceOf(ConflictException);
@@ -123,7 +123,7 @@ describe('TermLifecycleService', () => {
 
   it('translates a serialization conflict during term transition into a retryable conflict', async () => {
     const prisma = makePrisma({}, { code: 'P2034' });
-    const service = new TermLifecycleService(prisma as never);
+    const service = new TermLifecycleService(prisma as never, makeReadiness() as never);
     await expect(service.transitionTerm('term-1', 'OPEN' as any, 'actor-1'))
       .rejects.toBeInstanceOf(ConflictException);
   });
