@@ -370,4 +370,118 @@ describe('PaymentWebhookProcessor', () => {
     });
   });
 
+
+  it('does not mark a fee payment succeeded when its reservation total is invalid', async () => {
+    const paymentUpdate = jest.fn();
+    const receiptUpsert = jest.fn();
+    let processingError = '';
+    const prisma = {
+      $transaction: jest.fn(async (callback: (tx: any) => unknown) => callback({
+        providerWebhookEvent: {
+          findUnique: jest.fn().mockResolvedValue({ id: 'event-fee-mismatch', processedAt: null }),
+          update: jest.fn().mockImplementation(async ({ data }) => { processingError = data.processingError; return {}; }),
+        },
+        payment: {
+          findFirst: jest.fn().mockResolvedValue({ id: 'payment-fee-mismatch' }),
+          findUnique: jest.fn().mockResolvedValue({
+            id: 'payment-fee-mismatch', amount: new Prisma.Decimal('100.00'), currency: 'GHS', purpose: 'FEE', studentId: 'student-1',
+            status: PaymentStatus.PROCESSING, attempts: [], allocations: [],
+            paymentIntents: [{ id: 'intent-1', invoiceId: 'invoice-1', amount: new Prisma.Decimal('90.00'), status: 'PROCESSING', expiresAt: new Date() }],
+          }),
+          update: paymentUpdate,
+        },
+        receipt: { upsert: receiptUpsert },
+      })),
+    };
+    const processor = new PaymentWebhookProcessor(prisma as any);
+    await expect(processor.apply(normalized, 'event-fee-mismatch')).resolves.toEqual({ applied: false, reason: 'payment-intent-total-mismatch' });
+    expect(paymentUpdate).not.toHaveBeenCalled();
+    expect(receiptUpsert).not.toHaveBeenCalled();
+    expect(processingError).toContain('payment-intent reservation');
+  });
+
+  it('does not mark a wallet top-up succeeded without a student reference', async () => {
+    const paymentUpdate = jest.fn();
+    const receiptUpsert = jest.fn();
+    let processingError = '';
+    const prisma = {
+      $transaction: jest.fn(async (callback: (tx: any) => unknown) => callback({
+        providerWebhookEvent: {
+          findUnique: jest.fn().mockResolvedValue({ id: 'event-wallet-missing', processedAt: null }),
+          update: jest.fn().mockImplementation(async ({ data }) => { processingError = data.processingError; return {}; }),
+        },
+        payment: {
+          findFirst: jest.fn().mockResolvedValue({ id: 'payment-wallet-missing' }),
+          findUnique: jest.fn().mockResolvedValue({
+            id: 'payment-wallet-missing', amount: new Prisma.Decimal('50.00'), currency: 'GHS', purpose: 'WALLET_TOP_UP', studentId: null,
+            status: PaymentStatus.PROCESSING, attempts: [], allocations: [], paymentIntents: [],
+          }),
+          update: paymentUpdate,
+        },
+        receipt: { upsert: receiptUpsert },
+      })),
+    };
+    const processor = new PaymentWebhookProcessor(prisma as any);
+    await expect(processor.apply({ ...normalized, amount: '50.00' }, 'event-wallet-missing')).resolves.toEqual({ applied: false, reason: 'wallet-student-missing' });
+    expect(paymentUpdate).not.toHaveBeenCalled();
+    expect(receiptUpsert).not.toHaveBeenCalled();
+    expect(processingError).toContain('must reference a student');
+  });
+
+  it('does not mark a stationery payment succeeded without a matching order', async () => {
+    const paymentUpdate = jest.fn();
+    const receiptUpsert = jest.fn();
+    let processingError = '';
+    const prisma = {
+      $transaction: jest.fn(async (callback: (tx: any) => unknown) => callback({
+        providerWebhookEvent: {
+          findUnique: jest.fn().mockResolvedValue({ id: 'event-stationery-missing', processedAt: null }),
+          update: jest.fn().mockImplementation(async ({ data }) => { processingError = data.processingError; return {}; }),
+        },
+        payment: {
+          findFirst: jest.fn().mockResolvedValue({ id: 'payment-stationery-missing' }),
+          findUnique: jest.fn().mockResolvedValue({
+            id: 'payment-stationery-missing', amount: new Prisma.Decimal('25.00'), currency: 'GHS', purpose: 'STATIONERY', studentId: 'student-1', guardianId: 'guardian-1',
+            status: PaymentStatus.PROCESSING, attempts: [], allocations: [], paymentIntents: [],
+          }),
+          update: paymentUpdate,
+        },
+        $executeRaw: jest.fn().mockResolvedValue([]),
+        stationeryOrder: { findFirst: jest.fn().mockResolvedValue(null) },
+        receipt: { upsert: receiptUpsert },
+      })),
+    };
+    const processor = new PaymentWebhookProcessor(prisma as any);
+    await expect(processor.apply({ ...normalized, amount: '25.00' }, 'event-stationery-missing')).resolves.toEqual({ applied: false, reason: 'stationery-order-missing' });
+    expect(paymentUpdate).not.toHaveBeenCalled();
+    expect(receiptUpsert).not.toHaveBeenCalled();
+    expect(processingError).toContain('matching stationery order');
+  });
+
+  it('does not mark a stationery payment succeeded when the order does not match', async () => {
+    const paymentUpdate = jest.fn();
+    let processingError = '';
+    const prisma = {
+      $transaction: jest.fn(async (callback: (tx: any) => unknown) => callback({
+        providerWebhookEvent: {
+          findUnique: jest.fn().mockResolvedValue({ id: 'event-stationery-mismatch', processedAt: null }),
+          update: jest.fn().mockImplementation(async ({ data }) => { processingError = data.processingError; return {}; }),
+        },
+        payment: {
+          findFirst: jest.fn().mockResolvedValue({ id: 'payment-stationery-mismatch' }),
+          findUnique: jest.fn().mockResolvedValue({
+            id: 'payment-stationery-mismatch', amount: new Prisma.Decimal('25.00'), currency: 'GHS', purpose: 'STATIONERY', studentId: 'student-1', guardianId: 'guardian-1',
+            status: PaymentStatus.PROCESSING, attempts: [], allocations: [], paymentIntents: [],
+          }),
+          update: paymentUpdate,
+        },
+        $executeRaw: jest.fn().mockResolvedValue([]),
+        stationeryOrder: { findFirst: jest.fn().mockResolvedValue({ id: 'order-1', status: 'DRAFT', totalAmount: new Prisma.Decimal('30.00'), studentId: 'student-1', guardianId: 'guardian-1' }) },
+      })),
+    };
+    const processor = new PaymentWebhookProcessor(prisma as any);
+    await expect(processor.apply({ ...normalized, amount: '25.00' }, 'event-stationery-mismatch')).resolves.toEqual({ applied: false, reason: 'stationery-order-mismatch' });
+    expect(paymentUpdate).not.toHaveBeenCalled();
+    expect(processingError).toContain('does not match');
+  });
 });
