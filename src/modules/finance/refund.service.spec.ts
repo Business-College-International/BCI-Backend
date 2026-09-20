@@ -338,7 +338,10 @@ describe('RefundService', () => {
     const prisma = mockPrisma();
     const deps = mockDeps();
     prisma.$transaction.mockImplementation(async (callback: (client: any) => unknown) => callback(prisma));
-    prisma.refund.findUnique.mockResolvedValueOnce(makeProcessingRefund()).mockResolvedValueOnce({ id: 'refund-1', status: PaymentStatus.SUCCEEDED });
+    prisma.refund.findUnique
+      .mockResolvedValueOnce(makeProcessingRefund())
+      .mockResolvedValueOnce(makeProcessingRefund())
+      .mockResolvedValueOnce({ id: 'refund-1', status: PaymentStatus.SUCCEEDED });
     prisma.refund.update.mockResolvedValue({ id: 'refund-1', status: PaymentStatus.SUCCEEDED });
     prisma.studentInvoice.findUnique.mockResolvedValue({
       id: 'invoice-1',
