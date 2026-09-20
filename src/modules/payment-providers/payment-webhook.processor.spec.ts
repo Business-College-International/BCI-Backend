@@ -14,6 +14,7 @@ const normalized = {
 };
 
 describe('PaymentWebhookProcessor', () => {
+  const journal = { recordPaymentSettlement: jest.fn().mockResolvedValue([]) };
   it('updates a matching payment, provider attempt and invoice settlement state', async () => {
     const invoiceUpdate = jest.fn().mockResolvedValue({});
     const receiptUpsert = jest.fn().mockResolvedValue({ id: 'receipt-1', receiptNumber: 'BCI-RCPT-2026-TEST' });
@@ -58,9 +59,14 @@ describe('PaymentWebhookProcessor', () => {
       })),
     };
 
-    const processor = new PaymentWebhookProcessor(prisma as any);
+    const processor = new PaymentWebhookProcessor(prisma as any, journal as any);
     await expect(processor.apply(normalized, 'event-1')).resolves.toMatchObject({ applied: true, paymentId: 'payment-1', status: PaymentStatus.SUCCEEDED });
     expect(invoiceUpdate).toHaveBeenCalledWith({ where: { id: 'invoice-1' }, data: { status: InvoiceStatus.PAID } });
+    expect(journal.recordPaymentSettlement).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'payment-1', purpose: 'FEE', amount: new Prisma.Decimal('100.00'), currency: 'GHS' }),
+      undefined,
+      expect.any(Object),
+    );
     expect(receiptUpsert).toHaveBeenCalledWith({
       where: { paymentId: 'payment-1' },
       update: {},
@@ -87,7 +93,7 @@ describe('PaymentWebhookProcessor', () => {
       })),
     };
 
-    const processor = new PaymentWebhookProcessor(prisma as any);
+    const processor = new PaymentWebhookProcessor(prisma as any, journal as any);
     await expect(processor.apply(normalized, 'event-1')).resolves.toMatchObject({ applied: false, reason: 'payment-not-found' });
     expect(lookup).toEqual({
       provider: 'TEST',
@@ -105,7 +111,7 @@ describe('PaymentWebhookProcessor', () => {
       })),
     };
 
-    const processor = new PaymentWebhookProcessor(prisma as any);
+    const processor = new PaymentWebhookProcessor(prisma as any, journal as any);
     await expect(processor.apply(normalized, 'event-1')).resolves.toEqual({ applied: false, reason: 'duplicate-event' });
   });
 
@@ -135,7 +141,7 @@ describe('PaymentWebhookProcessor', () => {
       })),
     };
 
-    const processor = new PaymentWebhookProcessor(prisma as any);
+    const processor = new PaymentWebhookProcessor(prisma as any, journal as any);
     await expect(processor.apply(normalized, 'event-1')).resolves.toMatchObject({ applied: false, reason: 'amount-mismatch' });
     expect(recordedError).toContain('amount');
   });
@@ -166,7 +172,7 @@ describe('PaymentWebhookProcessor', () => {
       })),
     };
 
-    const processor = new PaymentWebhookProcessor(prisma as any);
+    const processor = new PaymentWebhookProcessor(prisma as any, journal as any);
     await expect(processor.apply({ ...normalized, paymentStatus: PaymentStatus.PROCESSING }, 'event-1'))
       .resolves.toMatchObject({ applied: false, reason: 'terminal-status-protected' });
     expect(errorMessage).toContain('Terminal payment status');
@@ -211,7 +217,7 @@ describe('PaymentWebhookProcessor', () => {
       })),
     };
 
-    const processor = new PaymentWebhookProcessor(prisma as any);
+    const processor = new PaymentWebhookProcessor(prisma as any, journal as any);
     await expect(processor.apply({ ...normalized, amount: '75.00' }, 'event-1'))
       .resolves.toMatchObject({ applied: true, paymentId: 'payment-1', status: PaymentStatus.SUCCEEDED });
 
@@ -278,7 +284,7 @@ describe('PaymentWebhookProcessor', () => {
       })),
     };
 
-    const processor = new PaymentWebhookProcessor(prisma as any);
+    const processor = new PaymentWebhookProcessor(prisma as any, journal as any);
     await expect(processor.apply({ ...normalized, amount: '75.00' }, 'event-2'))
       .resolves.toMatchObject({ applied: true, paymentId: 'payment-1', status: PaymentStatus.SUCCEEDED });
 
@@ -318,7 +324,7 @@ describe('PaymentWebhookProcessor', () => {
       })),
     };
 
-    const processor = new PaymentWebhookProcessor(prisma as any);
+    const processor = new PaymentWebhookProcessor(prisma as any, journal as any);
     await processor.apply({ ...normalized, amount: '25.00' }, 'event-stationery-lock');
 
     expect(raw).toHaveBeenCalledTimes(2);
@@ -360,7 +366,7 @@ describe('PaymentWebhookProcessor', () => {
       })),
     };
 
-    const processor = new PaymentWebhookProcessor(prisma as any);
+    const processor = new PaymentWebhookProcessor(prisma as any, journal as any);
     await expect(processor.apply({ ...normalized, amount: '25.00', clientReference: 'stationery-client-ref' }, 'event-stationery-1'))
       .resolves.toMatchObject({ applied: true, paymentId: 'payment-stationery-1', status: PaymentStatus.SUCCEEDED });
 
