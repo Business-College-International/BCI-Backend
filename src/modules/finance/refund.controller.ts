@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { RoleName } from '@prisma/client';
 import { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -24,9 +24,10 @@ export class RefundController {
   @Post()
   request(
     @Body() dto: RequestRefundDto,
+    @Headers('idempotency-key') idempotencyKey: string,
     @Req() request: AuthenticatedRequest,
   ) {
-    return this.refunds.requestRefund(dto, request.user.id, request.user.roles);
+    return this.refunds.requestRefund(dto, request.user.id, request.user.roles, idempotencyKey);
   }
 
   @Post(':refundId/approve')
