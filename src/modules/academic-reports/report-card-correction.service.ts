@@ -42,6 +42,9 @@ export class ReportCardCorrectionService {
 
     const replacementSnapshot = this.snapshotFromReport(report);
     const replacementSnapshotHash = hashSnapshot(replacementSnapshot);
+    if (replacementSnapshotHash === current.snapshotHash) {
+      throw new ConflictException('The correction request contains no effective change to the currently published report.');
+    }
 
     return this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT id FROM "ReportCardPublication" WHERE id = ${current.id} FOR UPDATE`;
