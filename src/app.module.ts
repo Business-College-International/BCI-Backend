@@ -1,4 +1,4 @@
-import { Controller, Get, Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { AcademicReportsModule } from './modules/academic-reports/academic-reports.module';
 import { AcademicsModule } from './modules/academics/academics.module';
 import { AnnouncementsModule } from './modules/announcements/announcements.module';
