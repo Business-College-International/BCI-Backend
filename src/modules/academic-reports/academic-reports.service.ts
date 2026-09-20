@@ -1,5 +1,5 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { RoleName, TermStatus } from '@prisma/client';
+import { Prisma, RoleName, TermStatus } from '@prisma/client';
 import { resolveGrade } from './grading-engine';
 import { PrismaService } from '../../prisma.service';
 
@@ -30,20 +30,26 @@ export class AcademicReportsService {
     return this.getStudentTermSummary(studentId, currentTerm.id, actorUserId, roles);
   }
 
-  async getStudentTermSummary(studentId: string, termId: string, actorUserId: string, roles: RoleName[]) {
-    const student = await this.prisma.student.findUnique({
+  async getStudentTermSummary(
+    studentId: string,
+    termId: string,
+    actorUserId: string,
+    roles: RoleName[],
+    db: PrismaService | Prisma.TransactionClient = this.prisma,
+  ) {
+    const student = await db.student.findUnique({
       where: { id: studentId },
       select: { id: true, admissionNumber: true, firstName: true, lastName: true, status: true },
     });
     if (!student) throw new NotFoundException('Student not found.');
 
-    const term = await this.prisma.term.findUnique({
+    const term = await db.term.findUnique({
       where: { id: termId },
       select: { id: true, code: true, name: true, startsAt: true, endsAt: true, academicYearId: true },
     });
     if (!term) throw new NotFoundException('Term not found.');
 
-    const enrolment = await this.prisma.enrolment.findFirst({
+    const enrolment = await db.enrolment.findFirst({
       where: { studentId, termId, status: 'ACTIVE' },
       select: {
         id: true,
@@ -54,14 +60,14 @@ export class AcademicReportsService {
       },
     });
 
-    const scope = await this.resolveScope(studentId, termId, actorUserId, roles);
+    const scope = await this.resolveScope(studentId, termId, actorUserId, roles, db);
     if (!scope.allowed) throw new ForbiddenException('You do not have access to this academic report.');
     if (scope.guardianRestricted) {
       throw new ForbiddenException('This guardian is not permitted to view academic records for this ward.');
     }
 
     const [results, attendanceRecords] = await Promise.all([
-      this.prisma.assessmentResult.findMany({
+      db.assessmentResult.findMany({
         where: { studentId, assessment: { termId } },
         include: {
           assessment: {
@@ -77,7 +83,7 @@ export class AcademicReportsService {
         },
         orderBy: [{ assessment: { subject: { name: 'asc' } } }, { assessment: { createdAt: 'asc' } }],
       }),
-      this.prisma.attendanceRecord.findMany({
+      db.attendanceRecord.findMany({
         where: {
           studentId,
           session: {
@@ -195,7 +201,7 @@ export class AcademicReportsService {
     } else if (enrolment) {
       const exact = enrolment.programme === 'NONE'
         ? null
-        : await this.prisma.gradingPolicy.findFirst({
+        : await db.gradingPolicy.findFirst({
             where: {
               academicYearId: term.academicYearId,
               level: enrolment.level,
@@ -204,7 +210,7 @@ export class AcademicReportsService {
             },
             include: { bands: { orderBy: { order: 'asc' } } },
           });
-      const policy = exact ?? await this.prisma.gradingPolicy.findFirst({
+      const policy = exact ?? await db.gradingPolicy.findFirst({
         where: {
           academicYearId: term.academicYearId,
           level: enrolment.level,
@@ -288,7 +294,13 @@ export class AcademicReportsService {
     };
   }
 
-  private async resolveScope(studentId: string, termId: string, actorUserId: string, roles: RoleName[]) {
+  private async resolveScope(
+    studentId: string,
+    termId: string,
+    actorUserId: string,
+    roles: RoleName[],
+    db: PrismaService | Prisma.TransactionClient = this.prisma,
+  ) {
     if (roles.some((role) => PRIVILEGED_ROLES.has(role))) return { allowed: true, guardianRestricted: false };
 
     const guardian = await this.prisma.guardian.findUnique({ where: { userId: actorUserId }, select: { personId: true } });
