@@ -73,7 +73,7 @@ describe('RefundService', () => {
       refunds: [{ amount: new Prisma.Decimal('60.00'), status: PaymentStatus.SUCCEEDED }],
     });
     const service = new RefundService(prisma, deps.disbursements, deps.journal);
-    await expect(service.requestRefund({ paymentId: 'payment-1', amount: '41.00', reason: 'Duplicate payment' }, 'user-1', [RoleName.ACCOUNTANT]))
+    await expect(service.requestRefund({ paymentId: 'payment-1', amount: '41.00', reason: 'Duplicate payment' }, 'user-1', [RoleName.ACCOUNTANT], 'refund-test-key-1'))
       .rejects.toBeInstanceOf(ConflictException);
   });
 
@@ -90,7 +90,7 @@ describe('RefundService', () => {
       allocations: [{ id: 'allocation-1', invoiceId: 'invoice-1', amount: new Prisma.Decimal('100.00') }],
       refunds: [],
     });
-    prisma.refund.create.mockResolvedValue({ id: 'refund-1', status: PaymentStatus.PENDING, amount: new Prisma.Decimal('40.00') });
+    prisma.refund.create.mockResolvedValue({ id: 'refund-1', status: PaymentStatus.PENDING, amount: new Prisma.Decimal('40.00'), reason: 'Duplicate payment', requestedBy: 'user-1', requestedAt: new Date('2026-09-20T12:00:00.000Z') });
     prisma.auditLog.create.mockResolvedValue({});
 
     const service = new RefundService(prisma, deps.disbursements, deps.journal);
@@ -115,7 +115,7 @@ describe('RefundService', () => {
       id: 'payment-1', status: PaymentStatus.SUCCEEDED, amount: new Prisma.Decimal('100.00'), purpose: PaymentPurpose.FEE,
       allocations: [{ id: 'allocation-1', invoiceId: 'invoice-1', amount: new Prisma.Decimal('100.00') }], refunds: [],
     });
-    prisma.refund.create.mockResolvedValue({ id: 'refund-1', paymentId: 'payment-1', amount: new Prisma.Decimal('40.00'), reason: 'Duplicate payment', requestedBy: 'user-1', status: PaymentStatus.PENDING });
+    prisma.refund.create.mockResolvedValue({ id: 'refund-1', paymentId: 'payment-1', amount: new Prisma.Decimal('40.00'), reason: 'Duplicate payment', requestedBy: 'user-1', requestedAt: new Date('2026-09-20T12:00:00.000Z'), status: PaymentStatus.PENDING });
     const service = new RefundService(prisma, deps.disbursements, deps.journal);
 
     await service.requestRefund({ paymentId: 'payment-1', amount: '40.00', reason: 'Duplicate payment' }, 'user-1', [RoleName.ACCOUNTANT], 'refund-test-key-3');
@@ -131,7 +131,7 @@ describe('RefundService', () => {
     prisma.$transaction.mockRejectedValue({ code: 'P2034' });
     const service = new RefundService(prisma, deps.disbursements, deps.journal);
 
-    await expect(service.requestRefund({ paymentId: 'payment-1', amount: '40.00', reason: 'Duplicate payment' }, 'user-1', [RoleName.ACCOUNTANT]))
+    await expect(service.requestRefund({ paymentId: 'payment-1', amount: '40.00', reason: 'Duplicate payment' }, 'user-1', [RoleName.ACCOUNTANT], 'refund-test-key-4'))
       .rejects.toBeInstanceOf(ConflictException);
   });
 
