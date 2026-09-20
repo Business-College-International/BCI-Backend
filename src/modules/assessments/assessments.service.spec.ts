@@ -9,10 +9,12 @@ type MockTx = {
   subject: { findUnique: jest.Mock };
   staff: { findUnique: jest.Mock };
   teacherAssignment: { findFirst: jest.Mock; findMany: jest.Mock };
-  assessment: { create: jest.Mock; findUnique: jest.Mock };
+  assessment: { create: jest.Mock; findUnique: jest.Mock; findMany: jest.Mock };
   enrolment: { findFirst: jest.Mock; findMany: jest.Mock };
   assessmentResult: { upsert: jest.Mock; findMany: jest.Mock };
   auditLog: { create: jest.Mock };
+  reportCardPublication: { findMany: jest.Mock };
+  reportCardCorrectionRequest: { findMany: jest.Mock };
 };
 
 function makeTx(): MockTx {
@@ -23,10 +25,12 @@ function makeTx(): MockTx {
     subject: { findUnique: jest.fn() },
     staff: { findUnique: jest.fn() },
     teacherAssignment: { findFirst: jest.fn(), findMany: jest.fn() },
-    assessment: { create: jest.fn(), findUnique: jest.fn() },
+    assessment: { create: jest.fn(), findUnique: jest.fn(), findMany: jest.fn() },
     enrolment: { findFirst: jest.fn(), findMany: jest.fn() },
     assessmentResult: { upsert: jest.fn(), findMany: jest.fn() },
     auditLog: { create: jest.fn() },
+    reportCardPublication: { findMany: jest.fn() },
+    reportCardCorrectionRequest: { findMany: jest.fn() },
   };
 }
 
@@ -42,6 +46,8 @@ function makePrisma(tx: MockTx): any {
     enrolment: tx.enrolment,
     teacherAssignment: tx.teacherAssignment,
     assessmentResult: { findMany: jest.fn() },
+    reportCardPublication: tx.reportCardPublication,
+    reportCardCorrectionRequest: tx.reportCardCorrectionRequest,
   };
 }
 
@@ -174,6 +180,89 @@ describe('AssessmentsService', () => {
       where: { studentId: 'student-1', status: 'ACTIVE', termId: 'historical-term-1' },
     }));
     expect(prisma.assessmentResult.findMany).not.toHaveBeenCalled();
+  });
+
+
+  it('blocks a published student result edit without a pending correction request inside the transaction', async () => {
+    const tx = makeTx();
+    tx.assessment.findUnique
+      .mockResolvedValueOnce({ id: 'assessment-1', termId: 'term-1' })
+      .mockResolvedValueOnce({ id: 'assessment-1', termId: 'term-1', subjectId: 'subject-1', maxScore: 50, term: { status: 'OPEN' } });
+    tx.staff.findUnique.mockResolvedValue({ personId: 'staff-1' });
+    tx.teacherAssignment.findFirst.mockResolvedValue({ id: 'assignment-1' });
+    tx.reportCardPublication.findMany.mockResolvedValue([{ id: 'pub-1', studentId: 'student-1' }]);
+    tx.reportCardCorrectionRequest.findMany.mockResolvedValue([]);
+    tx.enrolment.findMany.mockResolvedValue([{ studentId: 'student-1', classId: 'class-1' }]);
+
+    const service = new AssessmentsService(makePrisma(tx));
+
+    await expect(service.enterResults('assessment-1', { results: [{ studentId: 'student-1', score: 45 }] }, 'teacher-user', [RoleName.TEACHER]))
+      .rejects.toThrow('Submit a correction request');
+
+    expect(tx.assessmentResult.upsert).not.toHaveBeenCalled();
+  });
+
+  it('allows a published student result edit when the current publication has a pending correction request', async () => {
+    const tx = makeTx();
+    tx.assessment.findUnique
+      .mockResolvedValueOnce({ id: 'assessment-1', termId: 'term-1' })
+      .mockResolvedValueOnce({ id: 'assessment-1', termId: 'term-1', subjectId: 'subject-1', maxScore: 50, term: { status: 'OPEN' } });
+    tx.staff.findUnique.mockResolvedValue({ personId: 'staff-1' });
+    tx.teacherAssignment.findFirst.mockResolvedValue({ id: 'assignment-1' });
+    tx.reportCardPublication.findMany.mockResolvedValue([{ id: 'pub-1', studentId: 'student-1' }]);
+    tx.reportCardCorrectionRequest.findMany.mockResolvedValue([{ studentId: 'student-1', targetPublicationId: 'pub-1' }]);
+    tx.enrolment.findMany.mockResolvedValue([{ studentId: 'student-1', classId: 'class-1' }]);
+    tx.teacherAssignment.findMany.mockResolvedValue([{ classId: 'class-1' }]);
+    tx.assessmentResult.upsert.mockResolvedValue({ id: 'result-1' });
+    tx.auditLog.create.mockResolvedValue({});
+    tx.assessmentResult.findMany.mockResolvedValue([]);
+
+    const service = new AssessmentsService(makePrisma(tx));
+
+    await expect(service.enterResults('assessment-1', { results: [{ studentId: 'student-1', score: 45 }] }, 'teacher-user', [RoleName.TEACHER]))
+      .resolves.toEqual([]);
+
+    expect(tx.assessmentResult.upsert).toHaveBeenCalled();
+  });
+
+  it('lists assigned assessments with results scoped to the selected class roster', async () => {
+    const tx = makeTx();
+    tx.term.findUnique.mockResolvedValue({ id: 'term-1', academicYearId: 'year-1' });
+    tx.schoolClass!.findUnique!.mockResolvedValue({ id: 'class-1', academicYearId: 'year-1', level: 'SHS1' });
+    tx.subject.findUnique.mockResolvedValue({ id: 'subject-1', level: 'SHS1' });
+    tx.staff.findUnique.mockResolvedValue({ personId: 'staff-1' });
+    tx.teacherAssignment.findFirst.mockResolvedValue({ id: 'assignment-1' });
+    tx.assessment.findMany.mockResolvedValue([{
+      id: 'assessment-1',
+      title: 'Mid-term',
+      type: 'TEST',
+      maxScore: { toString: () => '50' },
+      weight: { toString: () => '100' },
+      createdAt: new Date('2026-09-20T08:00:00.000Z'),
+      results: [{
+        id: 'result-1', studentId: 'student-1', score: { toString: () => '45' },
+        remark: null, enteredAt: new Date('2026-09-20T08:30:00.000Z'), enteredBy: 'teacher-user',
+      }],
+    }]);
+
+    const service = new AssessmentsService(makePrisma(tx));
+    await expect(service.listAssignedAssessments('class-1', 'term-1', 'subject-1', 'teacher-user', [RoleName.TEACHER]))
+      .resolves.toEqual([{
+        id: 'assessment-1',
+        title: 'Mid-term',
+        type: 'TEST',
+        maxScore: '50',
+        weight: '100',
+        createdAt: new Date('2026-09-20T08:00:00.000Z'),
+        results: [{
+          id: 'result-1',
+          studentId: 'student-1',
+          score: '45',
+          remark: null,
+          enteredAt: new Date('2026-09-20T08:30:00.000Z'),
+          enteredBy: 'teacher-user',
+        }],
+      }]);
   });
 
 });
