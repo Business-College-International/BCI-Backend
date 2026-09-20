@@ -4,6 +4,7 @@ import { AssessmentsService } from './assessments.service';
 
 type MockTx = {
   $queryRaw: jest.Mock;
+  $executeRaw: jest.Mock;
   term: { findUnique: jest.Mock };
   schoolClass: { findUnique?: jest.Mock };
   subject: { findUnique: jest.Mock };
@@ -15,11 +16,14 @@ type MockTx = {
   auditLog: { create: jest.Mock };
   reportCardPublication: { findMany: jest.Mock };
   reportCardCorrectionRequest: { findMany: jest.Mock };
+  reportCardPublication: { findMany: jest.Mock };
+  reportCardCorrectionRequest: { findMany: jest.Mock };
 };
 
 function makeTx(): MockTx {
   return {
     $queryRaw: jest.fn().mockResolvedValue([{ id: 'term-1' }]),
+    $executeRaw: jest.fn().mockResolvedValue(1),
     term: { findUnique: jest.fn() },
     schoolClass: { findUnique: jest.fn() },
     subject: { findUnique: jest.fn() },
