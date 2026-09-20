@@ -297,5 +297,63 @@ describe('FinanceIntegrityService', () => {
   });
 
 
+  it('flags wallet withdrawals and reversals that are missing journal postings', async () => {
+    const prisma = mockPrisma();
+    prisma.walletTransaction.findMany.mockResolvedValue([
+      {
+        id: 'wallet-withdrawal-1',
+        walletId: 'student-1',
+        type: 'WITHDRAWAL',
+        direction: 'DEBIT',
+        amount: decimal('40.00'),
+        paymentId: null,
+        reversalOfId: null,
+        payment: null,
+        reversalOf: null,
+      },
+      {
+        id: 'wallet-reversal-1',
+        walletId: 'student-1',
+        type: 'REVERSAL',
+        direction: 'CREDIT',
+        amount: decimal('40.00'),
+        paymentId: null,
+        reversalOfId: 'wallet-withdrawal-1',
+        payment: null,
+        reversalOf: {
+          id: 'wallet-withdrawal-1',
+          walletId: 'student-1',
+          type: 'WITHDRAWAL',
+          direction: 'DEBIT',
+          amount: decimal('40.00'),
+          paymentId: null,
+        },
+      },
+    ]);
+    prisma.financialJournalEntry.findMany.mockResolvedValue([]);
+
+    const service = new FinanceIntegrityService(prisma);
+    const report = await service.getIntegrityReport('accountant-user', [RoleName.ACCOUNTANT]);
+
+    expect(report.findings.missingWalletJournalEntries).toEqual([
+      {
+        transactionId: 'wallet-withdrawal-1',
+        walletId: 'student-1',
+        type: 'WITHDRAWAL',
+        direction: 'DEBIT',
+        amount: '40.00',
+      },
+      {
+        transactionId: 'wallet-reversal-1',
+        walletId: 'student-1',
+        type: 'REVERSAL',
+        direction: 'CREDIT',
+        amount: '40.00',
+      },
+    ]);
+    expect(report.healthy).toBe(false);
+  });
+
+
 
 });
