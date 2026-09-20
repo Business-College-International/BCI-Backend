@@ -148,10 +148,6 @@ export class ReportCardCorrectionService {
       throw new ConflictException('The correction request no longer matches the current grading-policy version. Recalculate and submit a new request.');
     }
 
-    if (authoritativeReport.grading.policyVersionId !== report.gradingPolicyVersionId) {
-      throw new ConflictException('The correction would change the grading-policy version. Recalculate under the published policy version.');
-    }
-
     const authoritativeSnapshot = this.snapshotFromReport(authoritativeReport);
     const authoritativeSnapshotHash = hashSnapshot(authoritativeSnapshot);
     if (authoritativeSnapshotHash === report.targetPublication.snapshotHash) {
@@ -196,9 +192,9 @@ export class ReportCardCorrectionService {
             termId: request.termId,
             publicationVersion: (latest?.publicationVersion ?? 0) + 1,
             status: ReportCardPublicationStatus.PUBLISHED,
-            snapshotJson: request.replacementSnapshotJson as Prisma.InputJsonValue,
-            snapshotHash: request.replacementSnapshotHash,
-            gradingPolicyVersionId: request.gradingPolicyVersionId,
+            snapshotJson: authoritativeSnapshot as Prisma.InputJsonValue,
+            snapshotHash: authoritativeSnapshotHash,
+            gradingPolicyVersionId: current.gradingPolicyVersionId,
             publishedAt: new Date(),
             publishedBy: actorUserId,
           },
@@ -212,6 +208,8 @@ export class ReportCardCorrectionService {
             decidedAt: new Date(),
             decisionNote: trimmedNote,
             approvedPublicationId: replacement.id,
+            replacementSnapshotJson: authoritativeSnapshot as Prisma.InputJsonValue,
+            replacementSnapshotHash: authoritativeSnapshotHash,
           },
         });
 
