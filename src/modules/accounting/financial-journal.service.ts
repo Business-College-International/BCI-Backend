@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { PaymentPurpose, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
 import { randomBytes } from 'node:crypto';
 
