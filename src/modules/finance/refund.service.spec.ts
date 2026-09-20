@@ -358,6 +358,11 @@ describe('RefundService', () => {
     prisma.studentInvoice.update.mockResolvedValue({});
     prisma.auditLog.create.mockResolvedValue({});
     deps.journal.recordBalancedEntry.mockResolvedValue([]);
+    deps.disbursements.getTransferStatus.mockResolvedValue({
+      providerReference: 'moolre-ref-locked',
+      status: 'SUCCESSFUL',
+      mock: true,
+    });
 
     const service = new RefundService(prisma, deps.disbursements, deps.journal);
 
