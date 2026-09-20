@@ -31,7 +31,7 @@ const report = {
   grading: { assigned: true, reason: null, policyVersionId: 'policy-1', policyVersion: 'GRADING-2026', gradeCode: 'A', descriptor: 'Pass', pass: true, points: 4 },
 };
 
-function snapshotFor(value: typeof report) {
+function snapshotFor(value: any) {
   return {
     schemaVersion: 1,
     student: value.student,
