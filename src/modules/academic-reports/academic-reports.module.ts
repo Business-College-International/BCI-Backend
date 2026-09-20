@@ -7,9 +7,10 @@ import { GradingPolicyController } from './grading-policy.controller';
 import { GradingPolicyService } from './grading-policy.service';
 import { ReportCardPublicationController } from './report-card-publication.controller';
 import { ReportCardPublicationService } from './report-card-publication.service';
+import { ReportCardCorrectionService } from './report-card-correction.service';
 
 @Module({
   controllers: [AcademicReportsController, ReportReadinessController, GradingPolicyController, ReportCardPublicationController],
-  providers: [AcademicReportsService, ReportReadinessService, GradingPolicyService, ReportCardPublicationService],
+  providers: [AcademicReportsService, ReportReadinessService, GradingPolicyService, ReportCardPublicationService, ReportCardCorrectionService],
 })
 export class AcademicReportsModule {}

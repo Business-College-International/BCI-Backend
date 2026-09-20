@@ -142,6 +142,11 @@ enum ReportCardPublicationStatus {
   PUBLISHED
   VOIDED
 }
+enum ReportCardCorrectionDecision {
+  PENDING
+  APPROVED
+  REJECTED
+}
 enum ExpenseStatus {
   DRAFT
   SUBMITTED
@@ -232,6 +237,8 @@ model User {
   auditLogsAsUser       AuditLog[] @relation("UserAuditActor")
   notificationDeliveries NotificationDelivery[]
   sessions              RefreshSession[]
+  reportCardCorrectionsRequested ReportCardCorrectionRequest[] @relation("ReportCardCorrectionRequestedBy")
+  reportCardCorrectionsDecided   ReportCardCorrectionRequest[] @relation("ReportCardCorrectionDecidedBy")
 }
 
 model RefreshSession {
@@ -330,6 +337,7 @@ model Term {
   enrolments          Enrolment[]
   studentInvoices     StudentInvoice[]
   reportCardPublications ReportCardPublication[]
+  reportCardCorrectionRequests ReportCardCorrectionRequest[]
 
   @@unique([academicYearId, code])
   @@index([status, startsAt])
@@ -580,6 +588,7 @@ model Student {
   wallet            Wallet?
   walletWithdrawals WalletWithdrawal[]
   reportCardPublications ReportCardPublication[]
+  reportCardCorrectionRequests ReportCardCorrectionRequest[]
 }
 
 model StudentDocument {
@@ -728,6 +737,7 @@ model GradingPolicy {
   academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
   bands        GradingBand[]
   reportCardPublications ReportCardPublication[]
+  correctionRequests ReportCardCorrectionRequest[]
 
   @@index([academicYearId, level, programme, status])
 }
@@ -769,10 +779,43 @@ model ReportCardPublication {
   student       Student        @relation(fields: [studentId], references: [id], onDelete: Restrict)
   term          Term           @relation(fields: [termId], references: [id], onDelete: Restrict)
   gradingPolicy GradingPolicy? @relation(fields: [gradingPolicyVersionId], references: [id], onDelete: Restrict)
+  correctionRequests ReportCardCorrectionRequest[] @relation("CorrectionTarget")
+  approvedCorrectionRequests ReportCardCorrectionRequest[] @relation("CorrectionApprovedPublication")
 
   @@unique([studentId, termId, publicationVersion])
   @@index([studentId, termId, status])
   @@index([snapshotHash])
+}
+
+model ReportCardCorrectionRequest {
+  id                    String                        @id @default(uuid())
+  studentId             String
+  termId                String
+  targetPublicationId   String
+  replacementSnapshotJson Json
+  replacementSnapshotHash String
+  gradingPolicyVersionId String?
+  reason                String
+  requestedBy           String
+  requestedAt           DateTime                      @default(now())
+  decision              ReportCardCorrectionDecision @default(PENDING)
+  decidedBy             String?
+  decidedAt             DateTime?
+  decisionNote          String?
+  approvedPublicationId String?                       @unique
+  createdAt             DateTime                      @default(now())
+
+  student             Student             @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  term                Term                @relation(fields: [termId], references: [id], onDelete: Restrict)
+  targetPublication   ReportCardPublication @relation("CorrectionTarget", fields: [targetPublicationId], references: [id], onDelete: Restrict)
+  requestedByUser     User                @relation("ReportCardCorrectionRequestedBy", fields: [requestedBy], references: [id], onDelete: Restrict)
+  decidedByUser       User?               @relation("ReportCardCorrectionDecidedBy", fields: [decidedBy], references: [id], onDelete: Restrict)
+  gradingPolicy       GradingPolicy?      @relation(fields: [gradingPolicyVersionId], references: [id], onDelete: Restrict)
+  approvedPublication ReportCardPublication? @relation("CorrectionApprovedPublication", fields: [approvedPublicationId], references: [id], onDelete: Restrict)
+
+  @@index([studentId, termId, decision])
+  @@index([targetPublicationId])
+  @@index([requestedBy, requestedAt])
 }
 
 model FeeSchedule {
