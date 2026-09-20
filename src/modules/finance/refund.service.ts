@@ -374,6 +374,17 @@ export class RefundService {
               include: {
                 refunds: true,
                 allocations: { include: { invoice: { include: { lines: true } } } },
+                walletTransactions: {
+                  select: {
+                    id: true,
+                    walletId: true,
+                    type: true,
+                    direction: true,
+                    amount: true,
+                    paymentId: true,
+                    refundId: true,
+                  },
+                },
               },
             },
           },
@@ -403,6 +414,70 @@ export class RefundService {
           await tx.payment.update({ where: { id: refund.paymentId }, data: { status: PaymentStatus.REFUNDED } });
         }
 
+        if (refund.payment.purpose === PaymentPurpose.WALLET_TOP_UP) {
+          if (!refund.payment.studentId) {
+            throw new ConflictException('A wallet top-up refund requires a student wallet.');
+          }
+
+          await tx.$queryRaw`
+            SELECT "studentId"
+            FROM "Wallet"
+            WHERE "studentId" = ${refund.payment.studentId}
+            FOR UPDATE
+          `;
+
+          const original = refund.payment.walletTransactions.find(
+            (transaction) =>
+              transaction.paymentId === refund.payment.id &&
+              transaction.type === 'TOP_UP' &&
+              transaction.direction === 'CREDIT' &&
+              transaction.refundId === null,
+          );
+          if (!original) {
+            throw new ConflictException('The wallet top-up refund cannot be settled because its original wallet ledger entry is missing.');
+          }
+
+          const totalRefunded = refund.payment.refunds
+            .filter((item) => item.status === PaymentStatus.SUCCEEDED)
+            .reduce((sum, item) => sum.plus(item.amount), new Prisma.Decimal(0));
+          if (totalRefunded.gt(original.amount)) {
+            throw new ConflictException('Wallet refund settlement exceeds the original wallet top-up amount.');
+          }
+
+          const walletReversal = await tx.walletTransaction.create({
+            data: {
+              walletId: original.walletId,
+              type: 'REVERSAL',
+              direction: 'DEBIT',
+              amount: refund.amount,
+              refundId: refund.id,
+              processedBy: actorUserId,
+              note: 'Refund of wallet top-up ' + refund.payment.id,
+            },
+          });
+
+          await this.journal.recordBalancedEntry([
+            {
+              accountCode: 'WALLET_LIABILITY',
+              direction: 'DEBIT',
+              amount: walletReversal.amount.toFixed(2),
+              currency: refund.payment.currency,
+              referenceType: 'WalletTransaction',
+              referenceId: walletReversal.id,
+              description: 'Wallet refund reversal ' + walletReversal.id,
+            },
+            {
+              accountCode: 'CASH',
+              direction: 'CREDIT',
+              amount: walletReversal.amount.toFixed(2),
+              currency: refund.payment.currency,
+              referenceType: 'WalletTransaction',
+              referenceId: walletReversal.id,
+              description: 'Wallet refund reversal ' + walletReversal.id,
+            },
+          ], actorUserId, tx);
+        }
+
         if (refund.payment.purpose === PaymentPurpose.FEE) {
           if (refund.payment.allocations.length !== 1) {
             throw new ConflictException('A fee refund requires exactly one payment allocation.');
@@ -421,27 +496,29 @@ export class RefundService {
           }
         }
 
-        const debitAccount = refundAccountForPurpose(refund.payment.purpose);
-        await this.journal.recordBalancedEntry([
-          {
-            accountCode: debitAccount,
-            direction: 'DEBIT',
-            amount: refund.amount.toFixed(2),
-            currency: refund.payment.currency,
-            referenceType: 'Refund',
-            referenceId: refund.id,
-            description: `Refund ${refund.id}`,
-          },
-          {
-            accountCode: 'CASH',
-            direction: 'CREDIT',
-            amount: refund.amount.toFixed(2),
-            currency: refund.payment.currency,
-            referenceType: 'Refund',
-            referenceId: refund.id,
-            description: `Refund ${refund.id}`,
-          },
-        ], actorUserId, tx);
+        if (refund.payment.purpose !== PaymentPurpose.WALLET_TOP_UP) {
+          const debitAccount = refundAccountForPurpose(refund.payment.purpose);
+          await this.journal.recordBalancedEntry([
+            {
+              accountCode: debitAccount,
+              direction: 'DEBIT',
+              amount: refund.amount.toFixed(2),
+              currency: refund.payment.currency,
+              referenceType: 'Refund',
+              referenceId: refund.id,
+              description: `Refund ${refund.id}`,
+            },
+            {
+              accountCode: 'CASH',
+              direction: 'CREDIT',
+              amount: refund.amount.toFixed(2),
+              currency: refund.payment.currency,
+              referenceType: 'Refund',
+              referenceId: refund.id,
+              description: `Refund ${refund.id}`,
+            },
+          ], actorUserId, tx);
+        }
 
         await tx.auditLog.create({
           data: {
