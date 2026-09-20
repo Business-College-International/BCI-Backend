@@ -104,6 +104,7 @@ describe('FinanceIntegrityService', () => {
       stationeryOrder: { findMany: jest.fn().mockResolvedValue([]) },
       financialJournalEntry: { findMany: jest.fn().mockResolvedValue([]) },
     };
+    const service = new FinanceIntegrityService(prisma as never);
 
     const report = await service.getIntegrityReport('accountant-user', [RoleName.ACCOUNTANT]);
 
@@ -191,6 +192,7 @@ describe('FinanceIntegrityService', () => {
       payment: { findMany: jest.fn().mockResolvedValue([]) },
       paymentAllocation: { findMany: jest.fn().mockResolvedValue([]) },
       walletTransaction: { findMany: jest.fn().mockResolvedValue([]) },
+      financialJournalEntry: { findMany: jest.fn().mockResolvedValue([]) },
       financialJournalEntry: { findMany: jest.fn().mockResolvedValue([]) },
       stationeryOrder: {
         findMany: jest.fn().mockResolvedValue([{
