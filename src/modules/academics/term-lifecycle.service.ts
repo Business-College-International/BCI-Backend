@@ -1,11 +1,15 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service';
 import { CreateTermDto } from './dto/create-term.dto';
+import { TermClosureReadinessService } from './term-closure-readiness.service';
 import { Prisma, TermStatus } from '@prisma/client';
 
 @Injectable()
 export class TermLifecycleService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly closureReadiness: TermClosureReadinessService,
+  ) {}
 
   async createTerm(academicYearId: string, dto: CreateTermDto, actorUserId: string) {
     const startsAt = new Date(dto.startsAt);
@@ -86,6 +90,10 @@ export class TermLifecycleService {
         const allowed = (term.status === TermStatus.DRAFT && status === TermStatus.OPEN)
           || (term.status === TermStatus.OPEN && status === TermStatus.CLOSED);
         if (!allowed) throw new ConflictException(`Invalid term transition from ${term.status} to ${status}.`);
+
+        if (status === TermStatus.CLOSED) {
+          await this.closureReadiness.assertReadyForClosure(tx, id);
+        }
 
         if (status === TermStatus.OPEN) {
           await tx.term.updateMany({ where: { academicYearId: term.academicYearId, status: TermStatus.OPEN }, data: { status: TermStatus.CLOSED } });
