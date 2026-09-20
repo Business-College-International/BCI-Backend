@@ -55,4 +55,20 @@ describe('environment configuration', () => {
 
     expect(() => validateEnvironment()).toThrow('CORS_ORIGINS');
   });
+  it('rejects invalid trusted-proxy hop counts', () => {
+    process.env.DATABASE_URL = 'postgresql://localhost:5432/bci';
+    process.env.JWT_ACCESS_SECRET = 'a'.repeat(32);
+    process.env.TRUST_PROXY_HOPS = '11';
+
+    expect(() => validateEnvironment()).toThrow('TRUST_PROXY_HOPS');
+  });
+
+  it('accepts zero trusted-proxy hops by default', () => {
+    process.env.DATABASE_URL = 'postgresql://localhost:5432/bci';
+    process.env.JWT_ACCESS_SECRET = 'a'.repeat(32);
+    delete process.env.TRUST_PROXY_HOPS;
+
+    expect(() => validateEnvironment()).not.toThrow();
+  });
+
 });
