@@ -11,6 +11,7 @@ function mockPrisma() {
     guardianStudent: { findFirst: jest.fn() },
     studentInvoice: { findUnique: jest.fn(), update: jest.fn() },
     financialJournalEntry: { findMany: jest.fn(), create: jest.fn() },
+    idempotencyKey: { findUnique: jest.fn().mockResolvedValue(null), create: jest.fn().mockResolvedValue({}), update: jest.fn().mockResolvedValue({}) },
     $queryRaw: jest.fn().mockResolvedValue([]),
     $transaction: jest.fn(),
   } as any;
@@ -97,6 +98,7 @@ describe('RefundService', () => {
       { paymentId: 'payment-1', amount: '40.00', reason: 'Duplicate payment' },
       'user-1',
       [RoleName.ACCOUNTANT],
+      'refund-test-key-2',
     );
 
     expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
@@ -116,7 +118,7 @@ describe('RefundService', () => {
     prisma.refund.create.mockResolvedValue({ id: 'refund-1', paymentId: 'payment-1', amount: new Prisma.Decimal('40.00'), reason: 'Duplicate payment', requestedBy: 'user-1', status: PaymentStatus.PENDING });
     const service = new RefundService(prisma, deps.disbursements, deps.journal);
 
-    await service.requestRefund({ paymentId: 'payment-1', amount: '40.00', reason: 'Duplicate payment' }, 'user-1', [RoleName.ACCOUNTANT]);
+    await service.requestRefund({ paymentId: 'payment-1', amount: '40.00', reason: 'Duplicate payment' }, 'user-1', [RoleName.ACCOUNTANT], 'refund-test-key-3');
 
     expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), expect.objectContaining({
       isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
@@ -131,6 +133,119 @@ describe('RefundService', () => {
 
     await expect(service.requestRefund({ paymentId: 'payment-1', amount: '40.00', reason: 'Duplicate payment' }, 'user-1', [RoleName.ACCOUNTANT]))
       .rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('requires an idempotency key for refund requests', async () => {
+    const prisma = mockPrisma();
+    const deps = mockDeps();
+    const tx = prisma;
+    prisma.$transaction.mockImplementation(async (callback: (client: typeof tx) => unknown) => callback(tx));
+    const service = new RefundService(prisma, deps.disbursements, deps.journal);
+
+    await expect(
+      service.requestRefund(
+        { paymentId: 'payment-1', amount: '10.00', reason: 'Duplicate payment' },
+        'user-1',
+        [RoleName.ACCOUNTANT],
+        '',
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    expect(prisma.refund.create).not.toHaveBeenCalled();
+  });
+
+  it('replays a completed refund request without creating a second refund', async () => {
+    const prisma = mockPrisma();
+    const deps = mockDeps();
+    const request = { paymentId: 'payment-1', amount: '40.00', reason: 'Duplicate payment' };
+    const { createHash } = await import('node:crypto');
+    const requestHash = createHash('sha256')
+      .update(JSON.stringify(request))
+      .digest('hex');
+    prisma.idempotencyKey.findUnique.mockResolvedValue({
+      requestHash,
+      responseJson: {
+        id: 'refund-existing',
+        paymentId: 'payment-1',
+        amount: '40.00',
+        status: PaymentStatus.PENDING,
+      },
+    });
+    const service = new RefundService(prisma, deps.disbursements, deps.journal);
+
+    await expect(
+      service.requestRefund(request, 'user-1', [RoleName.ACCOUNTANT], 'refund-replay-key'),
+    ).resolves.toMatchObject({
+      id: 'refund-existing',
+      amount: '40.00',
+    });
+
+    expect(prisma.refund.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects reusing a refund idempotency key with different parameters', async () => {
+    const prisma = mockPrisma();
+    const deps = mockDeps();
+    prisma.idempotencyKey.findUnique.mockResolvedValue({
+      requestHash: 'different-request',
+      responseJson: null,
+    });
+    const service = new RefundService(prisma, deps.disbursements, deps.journal);
+
+    await expect(
+      service.requestRefund(
+        { paymentId: 'payment-1', amount: '50.00', reason: 'Different reason' },
+        'user-1',
+        [RoleName.ACCOUNTANT],
+        'refund-reuse-key',
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    expect(prisma.refund.create).not.toHaveBeenCalled();
+  });
+
+  it('stores the refund response under the idempotency key after creation', async () => {
+    const prisma = mockPrisma();
+    const deps = mockDeps();
+    prisma.payment.findUnique.mockResolvedValue({
+      id: 'payment-1',
+      status: PaymentStatus.SUCCEEDED,
+      amount: new Prisma.Decimal('100.00'),
+      purpose: PaymentPurpose.FEE,
+      allocations: [{ id: 'allocation-1', invoiceId: 'invoice-1', amount: new Prisma.Decimal('100.00') }],
+      refunds: [],
+    });
+    prisma.refund.create.mockResolvedValue({
+      id: 'refund-new',
+      paymentId: 'payment-1',
+      amount: new Prisma.Decimal('40.00'),
+      reason: 'Duplicate payment',
+      requestedBy: 'user-1',
+      requestedAt: new Date('2026-09-20T12:00:00.000Z'),
+      status: PaymentStatus.PENDING,
+    });
+    const service = new RefundService(prisma, deps.disbursements, deps.journal);
+
+    await expect(
+      service.requestRefund(
+        { paymentId: 'payment-1', amount: '40.00', reason: 'Duplicate payment' },
+        'user-1',
+        [RoleName.ACCOUNTANT],
+        'refund-create-key',
+      ),
+    ).resolves.toMatchObject({
+      id: 'refund-new',
+      amount: '40.00',
+      status: PaymentStatus.PENDING,
+    });
+
+    expect(prisma.idempotencyKey.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        statusCode: 201,
+        responseJson: expect.objectContaining({ id: 'refund-new', amount: '40.00' }),
+        completedAt: expect.any(Date),
+      }),
+    }));
   });
 
   it('prevents refund self-approval', async () => {
