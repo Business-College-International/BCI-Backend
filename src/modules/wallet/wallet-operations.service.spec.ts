@@ -28,7 +28,7 @@ describe('WalletOperationsService', () => {
 
   it('requires an idempotency key for withdrawals', async () => {
     await expect(
-      new WalletOperationsService(prisma, journal).withdraw(
+      new WalletOperationsService(prisma, journal as never).withdraw(
         'student-1',
         { amount: 10 },
         'user-1',
@@ -43,7 +43,7 @@ describe('WalletOperationsService', () => {
     tx.idempotencyKey.findUnique.mockResolvedValue({ requestHash: 'different-request', responseJson: null });
 
     await expect(
-      new WalletOperationsService(prisma, journal).withdraw(
+      new WalletOperationsService(prisma, journal as never).withdraw(
         'student-1',
         { amount: 10 },
         'user-1',
@@ -76,7 +76,7 @@ describe('WalletOperationsService', () => {
     });
 
     await expect(
-      new WalletOperationsService(prisma, journal).withdraw(
+      new WalletOperationsService(prisma, journal as never).withdraw(
         'student-1',
         { amount: 50, note: 'Student office withdrawal' },
         'user-1',
@@ -97,7 +97,7 @@ describe('WalletOperationsService', () => {
     });
 
     await expect(
-      new WalletOperationsService(prisma, journal).withdraw(
+      new WalletOperationsService(prisma, journal as never).withdraw(
         'student-1',
         { amount: 100.01 },
         'user-1',
@@ -118,7 +118,7 @@ describe('WalletOperationsService', () => {
     });
 
     await expect(
-      new WalletOperationsService(prisma, journal).withdraw(
+      new WalletOperationsService(prisma, journal as never).withdraw(
         'student-1',
         { amount: 10 },
         'user-1',
@@ -141,7 +141,7 @@ describe('WalletOperationsService', () => {
     tx.walletWithdrawal.create.mockResolvedValue({ id: 'withdrawal-1', status: 'DISPENSED' });
 
     await expect(
-      new WalletOperationsService(prisma, journal).withdraw(
+      new WalletOperationsService(prisma, journal as never).withdraw(
         'student-1',
         { amount: 50, note: 'Student office withdrawal' },
         'user-1',
@@ -203,7 +203,7 @@ describe('WalletOperationsService', () => {
     tx.walletWithdrawal.update.mockResolvedValue({});
 
     await expect(
-      new WalletOperationsService(prisma, journal).reverse(
+      new WalletOperationsService(prisma, journal as never).reverse(
         'student-1',
         'top-up',
         { reason: 'Provider payment was duplicated.' },
@@ -233,7 +233,7 @@ describe('WalletOperationsService', () => {
     });
 
     await expect(
-      new WalletOperationsService(prisma, journal).reverse(
+      new WalletOperationsService(prisma, journal as never).reverse(
         'student-1',
         'top-up',
         { reason: 'Duplicate provider settlement.' },
@@ -268,7 +268,7 @@ describe('WalletOperationsService', () => {
     tx.walletWithdrawal.update.mockResolvedValue({});
 
     await expect(
-      new WalletOperationsService(prisma, journal).reverse(
+      new WalletOperationsService(prisma, journal as never).reverse(
         'student-1',
         'withdrawal-1',
         { reason: 'Cash dispense was voided.' },
@@ -305,7 +305,7 @@ describe('WalletOperationsService', () => {
     });
 
     await expect(
-      new WalletOperationsService(prisma, journal).reverse(
+      new WalletOperationsService(prisma, journal as never).reverse(
         'student-1',
         'top-up',
         { reason: 'Duplicate provider settlement.' },
@@ -328,7 +328,7 @@ describe('WalletOperationsService', () => {
     });
 
     await expect(
-      new WalletOperationsService(prisma, journal).reverse(
+      new WalletOperationsService(prisma, journal as never).reverse(
         'student-1',
         'top-up',
         { reason: 'Second correction.' },
