@@ -1,4 +1,5 @@
 import { ConflictException, ForbiddenException } from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import { ReportCardCorrectionDecision, ReportCardPublicationStatus, RoleName } from '@prisma/client';
 import { ReportCardCorrectionService } from './report-card-correction.service';
 
@@ -30,6 +31,24 @@ const report = {
   grading: { assigned: true, reason: null, policyVersionId: 'policy-1', policyVersion: 'GRADING-2026', gradeCode: 'A', descriptor: 'Pass', pass: true, points: 4 },
 };
 
+function snapshotFor(value: typeof report) {
+  return {
+    schemaVersion: 1,
+    student: value.student,
+    term: value.term,
+    placement: value.placement,
+    calculation: value.calculation,
+    subjects: value.subjects,
+    assessments: value.assessments,
+    attendance: value.attendance,
+    grading: value.grading,
+  };
+}
+
+function hashSnapshot(value: unknown) {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+}
+
 describe('ReportCardCorrectionService', () => {
   it('rejects correction requests from non-teachers and non-reviewers', async () => {
     const { prisma } = makePrisma();
@@ -46,6 +65,7 @@ describe('ReportCardCorrectionService', () => {
       id: 'pub-1',
       publicationVersion: 1,
       status: ReportCardPublicationStatus.PUBLISHED,
+      gradingPolicyVersionId: 'policy-1',
     });
     const reports = { getStudentTermSummary: jest.fn().mockResolvedValue(report) };
     tx.reportCardCorrectionRequest.findFirst.mockResolvedValue(null);
@@ -81,34 +101,51 @@ describe('ReportCardCorrectionService', () => {
       .rejects.toBeInstanceOf(ConflictException);
   });
 
-  it('approves by voiding the current version and creating the next immutable version atomically', async () => {
+  it('approves a recalculated snapshot after the teacher edits authoritative assessment results', async () => {
     const { prisma, tx } = makePrisma();
-    const reports = { getStudentTermSummary: jest.fn().mockResolvedValue(report) };
+    const correctedReport = {
+      ...report,
+      calculation: { ...report.calculation, overallPercentage: 88 },
+      assessments: [{
+        id: 'result-1',
+        score: '44',
+        maxScore: '50',
+        percentage: 88,
+        weight: 100,
+        weightedContribution: 88,
+        remark: 'Corrected mark',
+        enteredAt: new Date('2026-09-20T08:00:00.000Z'),
+        assessment: {
+          id: 'assessment-1',
+          title: 'Mid-term test',
+          type: 'TEST',
+          subject: { code: 'MAT', name: 'Mathematics' },
+        },
+      }],
+    };
+    const baselineSnapshot = snapshotFor(report);
+    const correctedSnapshot = snapshotFor(correctedReport);
+
     const request = {
       id: 'corr-1',
       studentId: 'student-1',
       termId: 'term-1',
       targetPublicationId: 'pub-1',
-      replacementSnapshotJson: {
-        schemaVersion: 1,
-        student: report.student,
-        term: report.term,
-        placement: report.placement,
-        calculation: report.calculation,
-        subjects: report.subjects,
-        assessments: report.assessments,
-        attendance: report.attendance,
-        grading: report.grading,
-      },
-      replacementSnapshotHash: '',
+      replacementSnapshotJson: baselineSnapshot,
+      replacementSnapshotHash: hashSnapshot(baselineSnapshot),
       gradingPolicyVersionId: 'policy-1',
       decision: ReportCardCorrectionDecision.PENDING,
-      reason: 'Correct an assessment result.',
+      reason: 'Correct a test result.',
+      targetPublication: {
+        id: 'pub-1',
+        status: ReportCardPublicationStatus.PUBLISHED,
+        snapshotHash: hashSnapshot(baselineSnapshot),
+        gradingPolicyVersionId: 'policy-1',
+      },
     };
-    const { createHash } = await import('node:crypto');
-    request.replacementSnapshotHash = createHash('sha256').update(JSON.stringify(request.replacementSnapshotJson)).digest('hex');
 
     prisma.reportCardCorrectionRequest.findUnique.mockResolvedValue(request);
+    const reports = { getStudentTermSummary: jest.fn().mockResolvedValue(correctedReport) };
     tx.reportCardCorrectionRequest.findUnique.mockResolvedValue(request);
     tx.reportCardPublication.findUnique.mockResolvedValue({
       id: 'pub-1',
@@ -116,6 +153,7 @@ describe('ReportCardCorrectionService', () => {
       termId: 'term-1',
       publicationVersion: 1,
       status: ReportCardPublicationStatus.PUBLISHED,
+      gradingPolicyVersionId: 'policy-1',
     });
     tx.reportCardPublication.findFirst.mockResolvedValue({ publicationVersion: 1 });
     tx.reportCardPublication.update.mockResolvedValue({
@@ -127,34 +165,69 @@ describe('ReportCardCorrectionService', () => {
       id: 'pub-2',
       status: ReportCardPublicationStatus.PUBLISHED,
       publicationVersion: 2,
+      snapshotHash: hashSnapshot(correctedSnapshot),
+      gradingPolicyVersionId: 'policy-1',
     });
     tx.reportCardCorrectionRequest.update.mockResolvedValue({
       ...request,
+      replacementSnapshotJson: correctedSnapshot,
+      replacementSnapshotHash: hashSnapshot(correctedSnapshot),
       decision: ReportCardCorrectionDecision.APPROVED,
       approvedPublicationId: 'pub-2',
     });
 
     const service = new ReportCardCorrectionService(prisma as never, reports as never);
+    const result = await service.approve('corr-1', 'Reviewed corrected assessment evidence.', 'principal-1', [RoleName.PRINCIPAL]);
 
-    const result = await service.approve('corr-1', 'Reviewed source result and approved correction.', 'principal-1', [RoleName.PRINCIPAL]);
-
-    expect(result.replacementPublication).toMatchObject({ id: 'pub-2', publicationVersion: 2, status: ReportCardPublicationStatus.PUBLISHED });
-    expect(tx.reportCardPublication.update).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'pub-1' },
-      data: expect.objectContaining({ status: ReportCardPublicationStatus.VOIDED }),
-    }));
+    expect(reports.getStudentTermSummary).toHaveBeenCalledWith('student-1', 'term-1', 'principal-1', [RoleName.PRINCIPAL]);
+    expect(result.replacementPublication).toMatchObject({
+      id: 'pub-2',
+      publicationVersion: 2,
+      status: ReportCardPublicationStatus.PUBLISHED,
+    });
     expect(tx.reportCardPublication.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
-        publicationVersion: 2,
-        status: ReportCardPublicationStatus.PUBLISHED,
+        snapshotJson: correctedSnapshot,
+        snapshotHash: hashSnapshot(correctedSnapshot),
         gradingPolicyVersionId: 'policy-1',
-        snapshotHash: request.replacementSnapshotHash,
       }),
     }));
     expect(tx.reportCardCorrectionRequest.update).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'corr-1' },
-      data: expect.objectContaining({ decision: ReportCardCorrectionDecision.APPROVED, approvedPublicationId: 'pub-2' }),
+      data: expect.objectContaining({
+        replacementSnapshotJson: correctedSnapshot,
+        replacementSnapshotHash: hashSnapshot(correctedSnapshot),
+      }),
     }));
+  });
+
+  it('rejects approval when assessment data did not actually change the published snapshot', async () => {
+    const { prisma } = makePrisma();
+    const baselineSnapshot = snapshotFor(report);
+    const request = {
+      id: 'corr-2',
+      studentId: 'student-1',
+      termId: 'term-1',
+      targetPublicationId: 'pub-1',
+      replacementSnapshotJson: baselineSnapshot,
+      replacementSnapshotHash: hashSnapshot(baselineSnapshot),
+      gradingPolicyVersionId: 'policy-1',
+      decision: ReportCardCorrectionDecision.PENDING,
+      reason: 'No-op correction.',
+      targetPublication: {
+        id: 'pub-1',
+        status: ReportCardPublicationStatus.PUBLISHED,
+        snapshotHash: hashSnapshot(baselineSnapshot),
+        gradingPolicyVersionId: 'policy-1',
+      },
+    };
+    prisma.reportCardCorrectionRequest.findUnique.mockResolvedValue(request);
+    const reports = { getStudentTermSummary: jest.fn().mockResolvedValue(report) };
+    const service = new ReportCardCorrectionService(prisma as never, reports as never);
+
+    await expect(service.approve('corr-2', 'Reviewed source data and found no effective change.', 'principal-1', [RoleName.PRINCIPAL]))
+      .rejects.toBeInstanceOf(ConflictException);
+
+    expect(prisma.reportCardCorrectionRequest.findUnique).toHaveBeenCalled();
   });
 
   it('rejects a correction without changing the publication', async () => {
