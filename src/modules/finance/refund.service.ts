@@ -274,6 +274,14 @@ export class RefundService {
   private async settleSuccessfulRefund(refundId: string, actorUserId: string, providerReference: string) {
     try {
       return await this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`
+          SELECT r.id, p.id
+          FROM "Refund" r
+          INNER JOIN "Payment" p ON p.id = r."paymentId"
+          WHERE r.id = ${refundId}
+          FOR UPDATE OF r, p
+        `;
+
         const refund = await tx.refund.findUnique({
           where: { id: refundId },
           include: {
