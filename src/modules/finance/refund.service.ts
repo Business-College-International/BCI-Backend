@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { InvoiceStatus, PaymentPurpose, PaymentStatus, Prisma, RoleName } from '@prisma/client';
+import { createHash } from 'node:crypto';
 import { PrismaService } from '../../prisma.service';
 import { MoolreDisbursementService } from '../payment-providers/moolre.disbursement.service';
 import { RequestRefundDto } from './dto/request-refund.dto';
@@ -16,13 +17,52 @@ export class RefundService {
     private readonly journal: FinancialJournalService,
   ) {}
 
-  async requestRefund(dto: RequestRefundDto, actorUserId: string, roles: RoleName[]) {
+  async requestRefund(dto: RequestRefundDto, actorUserId: string, roles: RoleName[], idempotencyKey: string) {
     this.assertManage(roles);
+    const normalizedKey = idempotencyKey?.trim();
+    if (!normalizedKey) {
+      throw new ConflictException('An Idempotency-Key header is required for refund requests.');
+    }
+
     const amount = new Prisma.Decimal(dto.amount);
     if (amount.lte(0)) throw new BadRequestException('Refund amount must be greater than zero.');
 
+    const requestHash = createHash('sha256')
+      .update(JSON.stringify({
+        paymentId: dto.paymentId,
+        amount: dto.amount,
+        reason: dto.reason.trim(),
+      }))
+      .digest('hex');
+
     try {
-      return await this.prisma.$transaction(async (tx) => {
+      const result = await this.prisma.$transaction(async (tx) => {
+        const existingKey = await tx.idempotencyKey.findUnique({
+          where: {
+            userId_key_operation: {
+              userId: actorUserId,
+              key: normalizedKey,
+              operation: 'refund.request',
+            },
+          },
+        });
+        if (existingKey) {
+          if (existingKey.requestHash !== requestHash) {
+            throw new ConflictException('The refund Idempotency-Key was already used with different parameters.');
+          }
+          if (existingKey.responseJson) return { existing: existingKey.responseJson as Record<string, unknown> };
+          throw new ConflictException('An identical refund request is already in progress.');
+        }
+
+        await tx.idempotencyKey.create({
+          data: {
+            userId: actorUserId,
+            key: normalizedKey,
+            operation: 'refund.request',
+            requestHash,
+          },
+        });
+
         await tx.$queryRaw`SELECT id FROM "Payment" WHERE id = ${dto.paymentId} FOR UPDATE`;
         const payment = await tx.payment.findUnique({
           where: { id: dto.paymentId },
@@ -73,11 +113,56 @@ export class RefundService {
           },
         });
 
-        return refund;
+        const response = {
+          id: refund.id,
+          paymentId: refund.paymentId,
+          amount: refund.amount.toFixed(2),
+          status: refund.status,
+          reason: refund.reason,
+          requestedBy: refund.requestedBy,
+          requestedAt: refund.requestedAt.toISOString(),
+        };
+
+        await tx.idempotencyKey.update({
+          where: {
+            userId_key_operation: {
+              userId: actorUserId,
+              key: normalizedKey,
+              operation: 'refund.request',
+            },
+          },
+          data: {
+            responseJson: response,
+            statusCode: 201,
+            completedAt: new Date(),
+          },
+        });
+
+        return { response };
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 5000, timeout: 10000 });
+      return 'existing' in result ? result.existing : result.response;
     } catch (error) {
-      if ((error as { code?: string }).code === 'P2034') {
+      const code = (error as { code?: string }).code;
+      if (code === 'P2034') {
         throw new ConflictException('Refund changed concurrently. Please retry the refund request.');
+      }
+      if (code === 'P2002') {
+        const existing = await this.prisma.idempotencyKey.findUnique({
+          where: {
+            userId_key_operation: {
+              userId: actorUserId,
+              key: normalizedKey,
+              operation: 'refund.request',
+            },
+          },
+        });
+        if (existing?.requestHash !== requestHash) {
+          throw new ConflictException('The refund Idempotency-Key was already used with different parameters.');
+        }
+        if (!existing?.responseJson) {
+          throw new ConflictException('An identical refund request is already in progress.');
+        }
+        return existing.responseJson as Record<string, unknown>;
       }
       throw error;
     }
