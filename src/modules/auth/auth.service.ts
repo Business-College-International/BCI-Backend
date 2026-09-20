@@ -99,14 +99,63 @@ export class AuthService {
 
   async refresh(dto: RefreshDto) {
     const tokenHash = this.hashRefreshToken(dto.refreshToken);
-    const session = await this.prisma.refreshSession.findUnique({ where: { tokenHash }, include: { user: { include: { roles: true } } } });
-    if (!session || session.revokedAt || session.expiresAt <= new Date() || session.user.status !== UserStatus.ACTIVE) throw new UnauthorizedException('Refresh session is invalid or expired.');
+
     return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`
+        SELECT id
+        FROM "RefreshSession"
+        WHERE "tokenHash" = ${tokenHash}
+        FOR UPDATE
+      `;
+
+      const session = await tx.refreshSession.findUnique({
+        where: { tokenHash },
+        include: { user: { include: { roles: true } } },
+      });
+
+      if (
+        !session ||
+        session.revokedAt ||
+        session.expiresAt <= new Date() ||
+        session.user.status !== UserStatus.ACTIVE
+      ) {
+        throw new UnauthorizedException('Refresh session is invalid or expired.');
+      }
+
       const refreshToken = randomBytes(48).toString('base64url');
-      const replacement = await tx.refreshSession.create({ data: { userId: session.userId, tokenHash: this.hashRefreshToken(refreshToken), expiresAt: this.refreshExpiry(), lastUsedAt: new Date() } });
-      await tx.refreshSession.update({ where: { id: session.id }, data: { revokedAt: new Date(), lastUsedAt: new Date(), replacedById: replacement.id } });
-      const accessToken = await this.signAccessToken(session.user.id, session.user.tokenVersion, session.user.roles.map((r) => r.role));
+      const replacement = await tx.refreshSession.create({
+        data: {
+          userId: session.userId,
+          tokenHash: this.hashRefreshToken(refreshToken),
+          expiresAt: this.refreshExpiry(),
+          lastUsedAt: new Date(),
+        },
+      });
+
+      const consumed = await tx.refreshSession.updateMany({
+        where: { id: session.id, revokedAt: null },
+        data: {
+          revokedAt: new Date(),
+          lastUsedAt: new Date(),
+          replacedById: replacement.id,
+        },
+      });
+
+      if (consumed.count !== 1) {
+        throw new UnauthorizedException('Refresh session is invalid or expired.');
+      }
+
+      const accessToken = await this.signAccessToken(
+        session.user.id,
+        session.user.tokenVersion,
+        session.user.roles.map((r) => r.role),
+      );
+
       return { accessToken, refreshToken };
+    }, {
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      maxWait: 5000,
+      timeout: 15000,
     });
   }
 
