@@ -14,7 +14,7 @@ async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, { bufferLogs: true, rawBody: true });
 
   app.setGlobalPrefix('api/v1');
-  app.set('trust proxy', getTrustProxyHops());
+  app.getHttpAdapter().getInstance().set('trust proxy', getTrustProxyHops());
   app.enableCors({ origin: getCorsOrigins(), credentials: true });
   app.use(requestContextMiddleware);
   const rateLimiter = createRateLimitMiddleware(new PrismaRateLimitStore(app.get(PrismaService)));
