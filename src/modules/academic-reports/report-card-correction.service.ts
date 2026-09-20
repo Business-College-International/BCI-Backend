@@ -136,19 +136,6 @@ export class ReportCardCorrectionService {
     if (!report) throw new NotFoundException('Report-card correction request not found.');
     assertCorrectionDecisionTransition(report.decision, ReportCardCorrectionDecision.APPROVED);
 
-    const authoritativeReport = await this.reports.getStudentTermSummary(
-      report.studentId,
-      report.termId,
-      actorUserId,
-      roles,
-    );
-    if (!authoritativeReport.grading.assigned || authoritativeReport.grading.policyVersionId !== report.gradingPolicyVersionId) {
-      throw new ConflictException('The correction request no longer matches the current grading-policy version. Recalculate and submit a new request.');
-    }
-
-    const authoritativeSnapshot = this.snapshotFromReport(authoritativeReport);
-    const authoritativeSnapshotHash = hashSnapshot(authoritativeSnapshot);
-
     try {
       return await this.prisma.$transaction(async (tx) => {
         await tx.$executeRaw`SELECT id FROM "ReportCardCorrectionRequest" WHERE id = ${id} FOR UPDATE`;
@@ -181,6 +168,19 @@ export class ReportCardCorrectionService {
           throw new ConflictException('The correction must target the latest published report version.');
         }
 
+        const authoritativeReport = await this.reports.getStudentTermSummary(
+          request.studentId,
+          request.termId,
+          actorUserId,
+          roles,
+          tx,
+        );
+        if (!authoritativeReport.grading.assigned || authoritativeReport.grading.policyVersionId !== request.gradingPolicyVersionId) {
+          throw new ConflictException('The correction request no longer matches the current grading-policy version. Recalculate and submit a new request.');
+        }
+
+        const authoritativeSnapshot = this.snapshotFromReport(authoritativeReport);
+        const authoritativeSnapshotHash = hashSnapshot(authoritativeSnapshot);
         if (authoritativeSnapshotHash === current.snapshotHash) {
           throw new ConflictException('The correction request has no effective change to publish.');
         }
