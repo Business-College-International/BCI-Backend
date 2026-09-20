@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
 import { InvoiceStatus, PaymentStatus, Prisma, WalletTransactionDirection, WalletTransactionType } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
+import { FinancialJournalService } from '../accounting/financial-journal.service';
 import { NormalizedPaymentWebhook } from './payment-webhook.normalization';
 
 const TERMINAL_STATUSES = new Set<PaymentStatus>([
@@ -13,7 +14,10 @@ const TERMINAL_STATUSES = new Set<PaymentStatus>([
 
 @Injectable()
 export class PaymentWebhookProcessor {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly journal: FinancialJournalService,
+  ) {}
 
   async apply(normalized: NormalizedPaymentWebhook, eventId: string) {
     return this.prisma.$transaction(async (tx) => {
@@ -271,6 +275,10 @@ export class PaymentWebhookProcessor {
             });
           }
         }
+        if (payment.purpose === 'FEE' || payment.purpose === 'WALLET_TOP_UP' || payment.purpose === 'STATIONERY') {
+          await this.journal.recordPaymentSettlement(payment, undefined, tx);
+        }
+
         const invoiceIds = [...new Set(payment.paymentIntents.map((intent) => intent.invoiceId))];
         for (const invoiceId of invoiceIds) {
           await tx.$executeRaw`SELECT id FROM "StudentInvoice" WHERE id = ${invoiceId} FOR UPDATE`;
