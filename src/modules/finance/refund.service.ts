@@ -3,7 +3,7 @@ import { InvoiceStatus, PaymentPurpose, PaymentStatus, Prisma, RoleName } from '
 import { PrismaService } from '../../prisma.service';
 import { MoolreDisbursementService } from '../payment-providers/moolre.disbursement.service';
 import { RequestRefundDto } from './dto/request-refund.dto';
-import { FinancialJournalService } from './financial-journal.service';
+import { FinancialJournalService } from '../accounting/financial-journal.service';
 
 const FINANCE_ROLES = new Set<RoleName>([RoleName.DIRECTOR, RoleName.ACCOUNTANT, RoleName.OFFICE]);
 const REFUND_REFERENCE_PREFIX = 'bci-refund-';
