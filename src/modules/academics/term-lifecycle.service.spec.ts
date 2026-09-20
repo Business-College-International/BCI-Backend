@@ -2,6 +2,10 @@ import { BadRequestException, ConflictException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { TermLifecycleService } from './term-lifecycle.service';
 
+function makeReadiness() {
+  return { assertReadyForClosure: jest.fn().mockResolvedValue({ blockers: [] }) };
+}
+
 function makePrisma(tx: any, transactionError?: unknown) {
   return {
     $transaction: jest.fn(async (callback: (client: any) => unknown, options: unknown) => {
