@@ -16,8 +16,6 @@ type MockTx = {
   auditLog: { create: jest.Mock };
   reportCardPublication: { findMany: jest.Mock };
   reportCardCorrectionRequest: { findMany: jest.Mock };
-  reportCardPublication: { findMany: jest.Mock };
-  reportCardCorrectionRequest: { findMany: jest.Mock };
 };
 
 function makeTx(): MockTx {
