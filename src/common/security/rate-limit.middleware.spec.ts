@@ -24,6 +24,21 @@ class FakeStore implements RateLimitStore {
 }
 
 describe('createRateLimitMiddleware', () => {
+
+  it('does not require the rate-limit store for health probes', async () => {
+    const consume = jest.fn();
+    const store = { consume } as unknown as RateLimitStore;
+    const middleware = createRateLimitMiddleware(store);
+    const request = makeRequest('/api/v1/health', '203.0.113.10');
+    const response = makeResponse();
+    const next = jest.fn();
+
+    await middleware(request, response, next);
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(consume).not.toHaveBeenCalled();
+  });
+
   it('shares one counter across middleware instances when they use the same store', async () => {
     const store = new FakeStore();
     const first = createRateLimitMiddleware(store);
