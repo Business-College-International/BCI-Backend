@@ -334,6 +334,44 @@ describe('RefundService', () => {
     }));
   });
 
+  it('locks the refund and original payment before settlement evaluation', async () => {
+    const prisma = mockPrisma();
+    const deps = mockDeps();
+    prisma.$transaction.mockImplementation(async (callback: (client: any) => unknown) => callback(prisma));
+    prisma.refund.findUnique
+      .mockResolvedValueOnce(makeProcessingRefund())
+      .mockResolvedValueOnce(makeProcessingRefund())
+      .mockResolvedValueOnce({ id: 'refund-1', status: PaymentStatus.SUCCEEDED });
+    prisma.refund.update.mockResolvedValue({ id: 'refund-1', status: PaymentStatus.SUCCEEDED });
+    prisma.studentInvoice.findUnique.mockResolvedValue({
+      id: 'invoice-1',
+      status: InvoiceStatus.PAID,
+      lines: [{ amountDue: new Prisma.Decimal('100.00') }],
+      allocations: [{
+        amount: new Prisma.Decimal('100.00'),
+        payment: {
+          status: PaymentStatus.SUCCEEDED,
+          refunds: [{ id: 'refund-1', amount: new Prisma.Decimal('40.00'), status: PaymentStatus.SUCCEEDED }],
+        },
+      }],
+    });
+    prisma.studentInvoice.update.mockResolvedValue({});
+    prisma.auditLog.create.mockResolvedValue({});
+    deps.journal.recordBalancedEntry.mockResolvedValue([]);
+    deps.disbursements.getTransferStatus.mockResolvedValue({
+      providerReference: 'moolre-ref-locked',
+      status: 'SUCCESSFUL',
+      mock: true,
+    });
+
+    const service = new RefundService(prisma, deps.disbursements, deps.journal);
+
+    await expect(service.reconcileRefund('refund-1', 'operator-1', [RoleName.ACCOUNTANT]))
+      .resolves.toMatchObject({ status: PaymentStatus.SUCCEEDED });
+
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+  });
+
   it('settles a successful refund, reopens the invoice, and records a reversal journal', async () => {
     const prisma = mockPrisma();
     const deps = mockDeps();
