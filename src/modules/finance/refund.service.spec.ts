@@ -3,7 +3,7 @@ import { InvoiceStatus, PaymentPurpose, PaymentStatus, Prisma, RoleName } from '
 import { RefundService } from './refund.service';
 
 function mockPrisma() {
-  return {
+  const prisma = {
     payment: { findUnique: jest.fn() },
     refund: { create: jest.fn(), findUnique: jest.fn(), update: jest.fn(), updateMany: jest.fn(), findMany: jest.fn() },
     auditLog: { create: jest.fn() },
@@ -15,6 +15,8 @@ function mockPrisma() {
     $queryRaw: jest.fn().mockResolvedValue([]),
     $transaction: jest.fn(),
   } as any;
+  prisma.$transaction.mockImplementation(async (callback: (client: any) => unknown) => callback(prisma));
+  return prisma;
 }
 
 function mockDeps() {
