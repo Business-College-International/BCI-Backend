@@ -63,6 +63,10 @@ function limitForPath(path: string): number {
 
 export function createRateLimitMiddleware(store: RateLimitStore) {
   return async function rateLimitMiddleware(request: Request, response: Response, next: NextFunction): Promise<void> {
+    if (request.path === '/api/v1/health' || request.path.startsWith('/api/v1/health/')) {
+      next();
+      return;
+    }
     const key = `${clientKey(request)}:${request.path}`;
     const limit = limitForPath(request.path);
     try {
