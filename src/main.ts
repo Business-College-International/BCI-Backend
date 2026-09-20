@@ -1,10 +1,10 @@
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-import { randomUUID } from 'node:crypto';
-import type { NextFunction, Request, Response } from 'express';
+import type { Request, Response } from 'express';
 import { AppModule } from './app.module';
 import { getCorsOrigins, validateEnvironment } from './config/environment';
 import { requestLoggingMiddleware } from './common/logging/request-logging.middleware';
+import { requestContextMiddleware } from './common/request-context/request-context.middleware';
 import { createRateLimitMiddleware, PrismaRateLimitStore } from './common/security/rate-limit.middleware';
 import { PrismaService } from './prisma.service';
 
@@ -15,10 +15,7 @@ async function bootstrap(): Promise<void> {
 
   app.setGlobalPrefix('api/v1');
   app.enableCors({ origin: getCorsOrigins(), credentials: true });
-  app.use((_: Request, response: Response, next: NextFunction) => {
-    response.setHeader('X-Request-Id', randomUUID());
-    next();
-  });
+  app.use(requestContextMiddleware);
   const rateLimiter = createRateLimitMiddleware(new PrismaRateLimitStore(app.get(PrismaService)));
   app.use((request: Request, response: Response, next: NextFunction) => {
     void rateLimiter(request, response, next);
