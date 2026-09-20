@@ -43,6 +43,23 @@ export class AssessmentsController {
     );
   }
 
+  @Get('assigned')
+  @RequirePermissions(PERMISSIONS.ASSESSMENTS_READ)
+  getAssignedAssessments(
+    @Query('classId') classId: string,
+    @Query('termId') termId: string,
+    @Query('subjectId') subjectId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.assessments.listAssignedAssessments(
+      classId,
+      termId,
+      subjectId,
+      request.user.id,
+      request.user.roles,
+    );
+  }
+
   @Post(':assessmentId/results')
   @UseGuards(AssessmentWriteGuard)
   @RequirePermissions(PERMISSIONS.ASSESSMENTS_MANAGE)
