@@ -321,7 +321,7 @@ describe('PaymentWebhookProcessor', () => {
     const processor = new PaymentWebhookProcessor(prisma as any);
     await processor.apply({ ...normalized, amount: '25.00' }, 'event-stationery-lock');
 
-    expect(raw).toHaveBeenCalledTimes(2);
+    expect(raw).toHaveBeenCalledTimes(3);
     const sqlCalls = raw.mock.calls.map(([strings]: [TemplateStringsArray]) => Array.from(strings).join(''));
     expect(sqlCalls).toEqual(expect.arrayContaining([
       expect.stringContaining('Payment'),
@@ -381,6 +381,7 @@ describe('PaymentWebhookProcessor', () => {
           findUnique: jest.fn().mockResolvedValue({ id: 'event-fee-mismatch', processedAt: null }),
           update: jest.fn().mockImplementation(async ({ data }) => { processingError = data.processingError; return {}; }),
         },
+        $executeRaw: jest.fn().mockResolvedValue([]),
         payment: {
           findFirst: jest.fn().mockResolvedValue({ id: 'payment-fee-mismatch' }),
           findUnique: jest.fn().mockResolvedValue({
@@ -410,6 +411,7 @@ describe('PaymentWebhookProcessor', () => {
           findUnique: jest.fn().mockResolvedValue({ id: 'event-wallet-missing', processedAt: null }),
           update: jest.fn().mockImplementation(async ({ data }) => { processingError = data.processingError; return {}; }),
         },
+        $executeRaw: jest.fn().mockResolvedValue([]),
         payment: {
           findFirst: jest.fn().mockResolvedValue({ id: 'payment-wallet-missing' }),
           findUnique: jest.fn().mockResolvedValue({
