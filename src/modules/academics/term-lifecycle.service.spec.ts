@@ -21,7 +21,7 @@ describe('TermLifecycleService', () => {
       academicYear: { findUnique: jest.fn().mockResolvedValue({ id: 'year-1', startsAt: new Date('2026-09-01'), endsAt: new Date('2027-08-31') }) },
       term: { findFirst: jest.fn().mockResolvedValue({ id: 'term-1', code: 'T1' }) },
     };
-    const service = new TermLifecycleService(makePrisma(tx) as never);
+    const service = new TermLifecycleService(makePrisma(tx) as never, makeReadiness() as never);
     await expect(service.createTerm('year-1', { code: 'T2', name: 'Term 2', startsAt: '2027-01-01', endsAt: '2027-03-31', status: 'DRAFT' } as any, 'actor-1')).rejects.toBeInstanceOf(ConflictException);
   });
 
@@ -35,7 +35,7 @@ describe('TermLifecycleService', () => {
       },
       auditLog: { create: jest.fn() },
     };
-    const service = new TermLifecycleService(makePrisma(tx) as never);
+    const service = new TermLifecycleService(makePrisma(tx) as never, makeReadiness() as never);
     await service.transitionTerm('term-2', 'OPEN' as any, 'actor-1');
     expect(tx.term.updateMany).toHaveBeenCalledWith({ where: { academicYearId: 'year-1', status: 'OPEN' }, data: { status: 'CLOSED' } });
   });
@@ -63,7 +63,7 @@ describe('TermLifecycleService', () => {
       },
       auditLog: { create: jest.fn().mockResolvedValue({}) },
     };
-    const service = new TermLifecycleService(makePrisma(tx) as never);
+    const service = new TermLifecycleService(makePrisma(tx) as never, makeReadiness() as never);
 
     await service.createTerm('year-1', {
       code: 'T2',
@@ -87,7 +87,7 @@ describe('TermLifecycleService', () => {
       },
       auditLog: { create: jest.fn().mockResolvedValue({}) },
     };
-    const service = new TermLifecycleService(makePrisma(tx) as never);
+    const service = new TermLifecycleService(makePrisma(tx) as never, makeReadiness() as never);
 
     await service.transitionTerm('term-2', 'OPEN' as any, 'actor-1');
 
@@ -100,7 +100,7 @@ describe('TermLifecycleService', () => {
       $queryRaw: jest.fn().mockResolvedValue([{ id: 'term-1' }]),
       term: { findUnique: jest.fn().mockResolvedValue({ id: 'term-1', status: 'CLOSED', academicYearId: 'year-1' }) },
     };
-    const service = new TermLifecycleService(makePrisma(tx) as never);
+    const service = new TermLifecycleService(makePrisma(tx) as never, makeReadiness() as never);
     await expect(service.transitionTerm('term-1', 'OPEN' as any, 'actor-1')).rejects.toBeInstanceOf(ConflictException);
   });
 
@@ -109,7 +109,7 @@ describe('TermLifecycleService', () => {
       $queryRaw: jest.fn().mockResolvedValue([{ id: 'year-1' }]),
       academicYear: { findUnique: jest.fn().mockResolvedValue({ id: 'year-1', startsAt: new Date('2026-09-01'), endsAt: new Date('2027-08-31') }) },
     };
-    const service = new TermLifecycleService(makePrisma(tx) as never);
+    const service = new TermLifecycleService(makePrisma(tx) as never, makeReadiness() as never);
     await expect(service.createTerm('year-1', { code: 'T1', name: 'Term 1', startsAt: '2026-08-01', endsAt: '2026-12-01', status: 'DRAFT' } as any, 'actor-1')).rejects.toBeInstanceOf(BadRequestException);
   });
 
@@ -127,4 +127,63 @@ describe('TermLifecycleService', () => {
     await expect(service.transitionTerm('term-1', 'OPEN' as any, 'actor-1'))
       .rejects.toBeInstanceOf(ConflictException);
   });
+  it('checks closure readiness inside the same serializable transaction', async () => {
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'term-1' }]),
+      term: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'term-1',
+          academicYearId: 'year-1',
+          status: 'OPEN',
+        }),
+        update: jest.fn().mockResolvedValue({ id: 'term-1', status: 'CLOSED' }),
+        updateMany: jest.fn(),
+      },
+      auditLog: { create: jest.fn().mockResolvedValue({}) },
+    };
+    const readiness = { assertReadyForClosure: jest.fn().mockResolvedValue({ blockers: [] }) };
+    const prisma = makePrisma(tx);
+    const service = new TermLifecycleService(prisma as never, readiness as never);
+
+    await expect(
+      service.transitionTerm('term-1', 'CLOSED' as any, 'actor-1'),
+    ).resolves.toMatchObject({ status: 'CLOSED' });
+
+    expect(readiness.assertReadyForClosure).toHaveBeenCalledWith(tx, 'term-1');
+    expect(tx.term.update).toHaveBeenCalledWith({
+      where: { id: 'term-1' },
+      data: { status: 'CLOSED' },
+    });
+  });
+
+  it('blocks closure when readiness reports unresolved blockers', async () => {
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'term-1' }]),
+      term: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'term-1',
+          academicYearId: 'year-1',
+          status: 'OPEN',
+        }),
+        update: jest.fn(),
+        updateMany: jest.fn(),
+      },
+      auditLog: { create: jest.fn() },
+    };
+    const readiness = {
+      assertReadyForClosure: jest.fn().mockRejectedValue(
+        new BadRequestException('Term is not ready for closure: MISSING_ASSESSMENT_RESULTS'),
+      ),
+    };
+    const prisma = makePrisma(tx);
+    const service = new TermLifecycleService(prisma as never, readiness as never);
+
+    await expect(
+      service.transitionTerm('term-1', 'CLOSED' as any, 'actor-1'),
+    ).rejects.toThrow('MISSING_ASSESSMENT_RESULTS');
+
+    expect(tx.term.update).not.toHaveBeenCalled();
+    expect(tx.auditLog.create).not.toHaveBeenCalled();
+  });
+
 });
