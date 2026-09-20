@@ -1014,7 +1014,8 @@ model Refund {
   requestedAt       DateTime      @default(now())
   completedAt       DateTime?
 
-  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  payment          Payment          @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  walletTransaction WalletTransaction?
   @@index([paymentId, status])
 }
 
@@ -1034,6 +1035,7 @@ model WalletTransaction {
   paymentId         String?                   @unique
   reversalOfId      String?                   @unique
   withdrawalId      String?                   @unique
+  refundId          String?                   @unique
   providerReference String?
   processedBy       String?
   createdAt         DateTime                  @default(now())
@@ -1042,6 +1044,7 @@ model WalletTransaction {
   wallet     Wallet           @relation(fields: [walletId], references: [studentId], onDelete: Restrict)
   payment    Payment?         @relation(fields: [paymentId], references: [id], onDelete: Restrict)
   withdrawal WalletWithdrawal? @relation("WalletWithdrawalTransaction", fields: [withdrawalId], references: [id], onDelete: Restrict)
+  refund     Refund?          @relation(fields: [refundId], references: [id], onDelete: Restrict)
   reversalOf WalletTransaction? @relation("WalletTransactionReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
   reversal   WalletTransaction? @relation("WalletTransactionReversal")
 
