@@ -36,6 +36,9 @@ export class ReportCardCorrectionService {
     if (!report.grading.assigned || !report.grading.policyVersionId) {
       throw new ConflictException('A correction request requires a report with an assigned grading-policy version.');
     }
+    if (report.grading.policyVersionId !== current.gradingPolicyVersionId) {
+      throw new ConflictException('The active grading-policy version differs from the published report. Resolve the policy mismatch before requesting an assessment correction.');
+    }
 
     const replacementSnapshot = this.snapshotFromReport(report);
     const replacementSnapshotHash = hashSnapshot(replacementSnapshot);
@@ -144,9 +147,7 @@ export class ReportCardCorrectionService {
     }
 
     const authoritativeSnapshot = this.snapshotFromReport(authoritativeReport);
-    if (hashSnapshot(authoritativeSnapshot) !== report.replacementSnapshotHash) {
-      throw new ConflictException('The proposed correction snapshot is stale. Recalculate the report and submit a new correction request.');
-    }
+    const authoritativeSnapshotHash = hashSnapshot(authoritativeSnapshot);
 
     try {
       return await this.prisma.$transaction(async (tx) => {
@@ -162,6 +163,26 @@ export class ReportCardCorrectionService {
         const current = await tx.reportCardPublication.findUnique({ where: { id: request.targetPublicationId } });
         if (!current || current.status !== ReportCardPublicationStatus.PUBLISHED) {
           throw new ConflictException('The correction must target the current published report version.');
+        }
+        if (current.gradingPolicyVersionId !== request.gradingPolicyVersionId) {
+          throw new ConflictException('The published report grading-policy version no longer matches this correction request.');
+        }
+
+        const latestPublished = await tx.reportCardPublication.findFirst({
+          where: {
+            studentId: request.studentId,
+            termId: request.termId,
+            status: ReportCardPublicationStatus.PUBLISHED,
+          },
+          orderBy: { publicationVersion: 'desc' },
+          select: { id: true, publicationVersion: true },
+        });
+        if (!latestPublished || latestPublished.id !== current.id) {
+          throw new ConflictException('The correction must target the latest published report version.');
+        }
+
+        if (authoritativeSnapshotHash === current.snapshotHash) {
+          throw new ConflictException('The correction request has no effective change to publish.');
         }
 
         const latest = await tx.reportCardPublication.findFirst({
@@ -186,9 +207,9 @@ export class ReportCardCorrectionService {
             termId: request.termId,
             publicationVersion: (latest?.publicationVersion ?? 0) + 1,
             status: ReportCardPublicationStatus.PUBLISHED,
-            snapshotJson: request.replacementSnapshotJson as Prisma.InputJsonValue,
-            snapshotHash: request.replacementSnapshotHash,
-            gradingPolicyVersionId: request.gradingPolicyVersionId,
+            snapshotJson: authoritativeSnapshot as Prisma.InputJsonValue,
+            snapshotHash: authoritativeSnapshotHash,
+            gradingPolicyVersionId: current.gradingPolicyVersionId,
             publishedAt: new Date(),
             publishedBy: actorUserId,
           },
@@ -202,6 +223,8 @@ export class ReportCardCorrectionService {
             decidedAt: new Date(),
             decisionNote: trimmedNote,
             approvedPublicationId: replacement.id,
+            replacementSnapshotJson: authoritativeSnapshot as Prisma.InputJsonValue,
+            replacementSnapshotHash: authoritativeSnapshotHash,
           },
         });
 
