@@ -74,7 +74,19 @@ describe('AuthService current-user contract', () => {
 
 
 describe('AuthService refresh-token rotation', () => {
-  const activeSession = {
+  const activeSession: {
+    id: string;
+    userId: string;
+    tokenHash: string;
+    expiresAt: Date;
+    revokedAt: Date | null;
+    user: {
+      id: string;
+      tokenVersion: number;
+      status: UserStatus;
+      roles: Array<{ role: RoleName }>;
+    };
+  } = {
     id: 'session-1',
     userId: 'user-1',
     tokenHash: 'hashed-token',
