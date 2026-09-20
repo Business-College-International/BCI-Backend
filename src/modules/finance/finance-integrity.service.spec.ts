@@ -119,6 +119,7 @@ describe('FinanceIntegrityService', () => {
       payment: { findMany: jest.fn().mockResolvedValue([]) },
       paymentAllocation: { findMany: jest.fn().mockResolvedValue([]) },
       stationeryOrder: { findMany: jest.fn().mockResolvedValue([]) },
+      financialJournalEntry: { findMany: jest.fn().mockResolvedValue([]) },
       walletTransaction: {
         findMany: jest.fn().mockResolvedValue([
           {
@@ -190,6 +191,7 @@ describe('FinanceIntegrityService', () => {
       payment: { findMany: jest.fn().mockResolvedValue([]) },
       paymentAllocation: { findMany: jest.fn().mockResolvedValue([]) },
       walletTransaction: { findMany: jest.fn().mockResolvedValue([]) },
+      financialJournalEntry: { findMany: jest.fn().mockResolvedValue([]) },
       stationeryOrder: {
         findMany: jest.fn().mockResolvedValue([{
           id: 'order-1',
