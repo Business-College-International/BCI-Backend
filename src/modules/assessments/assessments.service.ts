@@ -188,6 +188,8 @@ export class AssessmentsService {
       const ids = dto.results.map((result) => result.studentId);
       if (new Set(ids).size !== ids.length) throw new BadRequestException('Duplicate student IDs are not allowed.');
 
+      await this.assertPublishedReportEditAccess(tx, ids, assessment.termId);
+
       const eligible = await this.findEligibleStudents(tx, ids, assessment.termId, assessment.subjectId, actorUserId, roles);
       const invalid = ids.filter((id) => !eligible.has(id));
       if (invalid.length > 0) {
@@ -316,6 +318,44 @@ export class AssessmentsService {
     }));
   }
 
+  private async assertPublishedReportEditAccess(
+    tx: Prisma.TransactionClient,
+    studentIds: string[],
+    termId: string,
+  ) {
+    if (studentIds.length === 0) return;
+
+    await tx.$executeRaw`
+      SELECT id
+      FROM "ReportCardPublication"
+      WHERE "termId" = ${termId}
+        AND status = 'PUBLISHED'
+        AND "studentId" IN (${Prisma.join(studentIds)})
+      FOR UPDATE
+    `;
+
+    const published = await tx.reportCardPublication.findMany({
+      where: { studentId: { in: studentIds }, termId, status: 'PUBLISHED' },
+      select: { id: true, studentId: true },
+    });
+    if (published.length === 0) return;
+
+    const pending = await tx.reportCardCorrectionRequest.findMany({
+      where: {
+        studentId: { in: published.map((row) => row.studentId) },
+        termId,
+        targetPublicationId: { in: published.map((row) => row.id) },
+        decision: 'PENDING',
+      },
+      select: { studentId: true, targetPublicationId: true },
+    });
+
+    const permitted = new Set(pending.map((row) => row.studentId));
+    const blocked = published.filter((row) => !permitted.has(row.studentId));
+    if (blocked.length > 0) {
+      throw new BadRequestException('Published report cards are read-only. Submit a correction request before changing their assessment results.');
+    }
+  }
   private async assertTeacherAssignment(
     tx: Prisma.TransactionClient,
     actorUserId: string,
