@@ -16,7 +16,7 @@ describe('request correlation context', () => {
 
   it('injects the active request id into AuditLog create params', async () => {
     const requestId = randomUUID();
-    const params = {
+    const params: { model: string; action: string; args: { data: Record<string, unknown> } } = {
       model: 'AuditLog',
       action: 'create',
       args: { data: { entityType: 'Student', entityId: 'student-1' } },
