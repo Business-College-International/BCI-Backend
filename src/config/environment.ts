@@ -2,6 +2,18 @@ import { Logger } from '@nestjs/common';
 
 const REQUIRED = ['DATABASE_URL', 'JWT_ACCESS_SECRET'] as const;
 
+export function getTrustProxyHops(): number {
+  const raw = process.env.TRUST_PROXY_HOPS?.trim();
+  if (!raw) return 0;
+
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 10) {
+    throw new Error('TRUST_PROXY_HOPS must be an integer between 0 and 10.');
+  }
+
+  return parsed;
+}
+
 export function getCorsOrigins(): string[] {
   const configured = process.env.CORS_ORIGINS?.split(',').map((value) => value.trim()).filter(Boolean) ?? [];
   const nodeEnv = process.env.NODE_ENV ?? 'development';
@@ -39,5 +51,6 @@ export function validateEnvironment(): void {
   }
 
   getCorsOrigins();
+  getTrustProxyHops();
   Logger.log(`Environment validated (${nodeEnv}).`, 'Startup');
 }

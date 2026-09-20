@@ -2,7 +2,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import type { NextFunction, Request, Response } from 'express';
 import { AppModule } from './app.module';
-import { getCorsOrigins, validateEnvironment } from './config/environment';
+import { getCorsOrigins, getTrustProxyHops, validateEnvironment } from './config/environment';
 import { requestLoggingMiddleware } from './common/logging/request-logging.middleware';
 import { requestContextMiddleware } from './common/request-context/request-context.middleware';
 import { createRateLimitMiddleware, PrismaRateLimitStore } from './common/security/rate-limit.middleware';
@@ -14,6 +14,7 @@ async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, { bufferLogs: true, rawBody: true });
 
   app.setGlobalPrefix('api/v1');
+  app.getHttpAdapter().getInstance().set('trust proxy', getTrustProxyHops());
   app.enableCors({ origin: getCorsOrigins(), credentials: true });
   app.use(requestContextMiddleware);
   const rateLimiter = createRateLimitMiddleware(new PrismaRateLimitStore(app.get(PrismaService)));

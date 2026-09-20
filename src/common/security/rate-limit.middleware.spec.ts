@@ -63,4 +63,18 @@ describe('createRateLimitMiddleware', () => {
     expect(result.count).toBe(16);
     expect(queryRaw).toHaveBeenCalledTimes(1);
   });
+  it('does not let a caller-supplied X-Forwarded-For change the limiter identity', async () => {
+    const store = new FakeStore();
+    const middleware = createRateLimitMiddleware(store);
+    const request = makeRequest('/api/v1/auth/login', '203.0.113.10');
+    request.headers['x-forwarded-for'] = '198.51.100.20';
+    const response = makeResponse();
+    const next = jest.fn();
+
+    await middleware(request, response, next);
+
+    expect([...store.counts.keys()]).toEqual(['203.0.113.10:/api/v1/auth/login']);
+    expect(next).toHaveBeenCalledTimes(1);
+  });
+
 });

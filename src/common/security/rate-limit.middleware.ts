@@ -51,9 +51,7 @@ export class PrismaRateLimitStore implements RateLimitStore {
 }
 
 function clientKey(request: Request): string {
-  const forwarded = request.headers['x-forwarded-for'];
-  const source = Array.isArray(forwarded) ? forwarded[0] : forwarded?.split(',')[0];
-  return source?.trim() || request.ip || request.socket.remoteAddress || 'unknown';
+  return request.ip?.trim() || request.socket.remoteAddress || 'unknown';
 }
 
 function limitForPath(path: string): number {
