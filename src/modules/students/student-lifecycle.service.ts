@@ -9,14 +9,17 @@ export class StudentLifecycleService {
 
   async assignElective(studentId: string, actorUserId: string, dto: AssignElectiveDto) {
     return this.prisma.$transaction(async (tx) => {
-      const [student, enrolment, subject] = await Promise.all([
+      const [student, enrolment, subject, term] = await Promise.all([
         tx.student.findUnique({ where: { id: studentId }, select: { id: true, status: true } }),
         tx.enrolment.findFirst({ where: { studentId, termId: dto.termId, status: 'ACTIVE' } }),
         tx.subject.findUnique({ where: { id: dto.subjectId } }),
+        tx.term.findUnique({ where: { id: dto.termId }, select: { id: true, status: true } }),
       ]);
       if (!student) throw new NotFoundException('Student not found.');
       if (student.status !== 'ACTIVE') throw new ConflictException('Only active students can receive elective assignments.');
       if (!enrolment) throw new BadRequestException('Student has no active enrolment for the selected term.');
+      if (!term) throw new NotFoundException('Term not found.');
+      if (term.status === 'CLOSED') throw new BadRequestException('Elective assignments cannot be changed after the term is closed.');
       if (!subject) throw new NotFoundException('Subject not found.');
       if (!subject.isActive || !subject.isElective) throw new BadRequestException('Selected subject is not an active elective.');
       if (subject.level !== enrolment.level) throw new BadRequestException('Elective subject level does not match the student enrolment.');
@@ -36,8 +39,14 @@ export class StudentLifecycleService {
 
   async removeElective(studentId: string, subjectId: string, termId: string, actorUserId: string) {
     return this.prisma.$transaction(async (tx) => {
-      const enrolment = await tx.enrolment.findFirst({ where: { studentId, termId }, select: { id: true } });
+      const [enrolment, term] = await Promise.all([
+        tx.enrolment.findFirst({ where: { studentId, termId }, select: { id: true, status: true } }),
+        tx.term.findUnique({ where: { id: termId }, select: { id: true, status: true } }),
+      ]);
+      if (!term) throw new NotFoundException('Term not found.');
+      if (term.status === 'CLOSED') throw new BadRequestException('Elective assignments cannot be changed after the term is closed.');
       if (!enrolment) throw new NotFoundException('Student enrolment for the selected term was not found.');
+      if (enrolment.status !== 'ACTIVE') throw new ConflictException('Electives cannot be changed without an active enrolment for the selected term.');
       const elective = await tx.studentElective.findFirst({ where: { enrolmentId: enrolment.id, subjectId } });
       if (!elective) throw new NotFoundException('Student elective assignment was not found.');
       await tx.studentElective.delete({ where: { id: elective.id } });
