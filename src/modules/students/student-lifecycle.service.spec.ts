@@ -112,6 +112,7 @@ describe('StudentLifecycleService', () => {
       student: { findUnique: jest.fn().mockResolvedValue({ id: 'student-1', status: 'ACTIVE' }) },
       enrolment: { findFirst: jest.fn().mockResolvedValue({ id: 'enrol-1', level: 'SHS1', programme: 'BUSINESS' }) },
       subject: { findUnique: jest.fn().mockResolvedValue({ id: 'subject-1', isActive: true, isElective: true, level: 'SHS1', programme: 'BUSINESS' }) },
+      term: { findUnique: jest.fn().mockResolvedValue({ id: 'term-1', status: 'OPEN' }) },
       term: { findUnique: jest.fn().mockResolvedValue({ id: 'term-1', status: 'CLOSED' }) },
       studentElective: { findFirst: jest.fn(), create: jest.fn() },
       auditLog: { create: jest.fn() },
