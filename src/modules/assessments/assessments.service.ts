@@ -111,6 +111,59 @@ export class AssessmentsService {
     return rows.map(({ student }) => student);
   }
 
+  async listAssignedAssessments(
+    classId: string,
+    termId: string,
+    subjectId: string,
+    actorUserId: string,
+    roles: RoleName[],
+  ) {
+    const [term, schoolClass, subject] = await Promise.all([
+      this.prisma.term.findUnique({ where: { id: termId }, select: { id: true, status: true, academicYearId: true } }),
+      this.prisma.schoolClass.findUnique({ where: { id: classId }, select: { id: true, level: true, academicYearId: true } }),
+      this.prisma.subject.findUnique({ where: { id: subjectId }, select: { id: true, level: true } }),
+    ]);
+
+    if (!term || !schoolClass || !subject) throw new NotFoundException('Term, class, or subject not found.');
+    if (schoolClass.academicYearId !== term.academicYearId) {
+      throw new BadRequestException('The class does not belong to the selected term academic year.');
+    }
+    if (subject.level !== schoolClass.level) {
+      throw new BadRequestException('The subject level does not match the class level.');
+    }
+
+    await this.assertTeacherAssignmentForClass(this.prisma, actorUserId, roles, termId, subjectId, classId);
+
+    const assessments = await this.prisma.assessment.findMany({
+      where: { termId, subjectId },
+      include: {
+        results: {
+          where: { student: { enrolments: { some: { classId, termId, status: 'ACTIVE' } } } },
+          select: { id: true, studentId: true, score: true, remark: true, enteredAt: true, enteredBy: true },
+          orderBy: { studentId: 'asc' },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    return assessments.map((assessment) => ({
+      id: assessment.id,
+      title: assessment.title,
+      type: assessment.type,
+      maxScore: assessment.maxScore.toString(),
+      weight: assessment.weight?.toString() ?? null,
+      createdAt: assessment.createdAt,
+      results: assessment.results.map((result) => ({
+        id: result.id,
+        studentId: result.studentId,
+        score: result.score.toString(),
+        remark: result.remark,
+        enteredAt: result.enteredAt,
+        enteredBy: result.enteredBy,
+      })),
+    }));
+  }
+
   async enterResults(assessmentId: string, dto: EnterAssessmentResultsDto, actorUserId: string, roles: RoleName[]) {
     return this.prisma.$transaction(async (tx) => {
       const assessmentTerm = await tx.assessment.findUnique({
