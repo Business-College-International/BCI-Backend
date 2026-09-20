@@ -400,7 +400,7 @@ describe('PaymentWebhookProcessor', () => {
         receipt: { upsert: receiptUpsert },
       })),
     };
-    const processor = new PaymentWebhookProcessor(prisma as any);
+    const processor = new PaymentWebhookProcessor(prisma as any, journal as any);
     await expect(processor.apply(normalized, 'event-fee-mismatch')).resolves.toEqual({ applied: false, reason: 'payment-intent-total-mismatch' });
     expect(paymentUpdate).not.toHaveBeenCalled();
     expect(receiptUpsert).not.toHaveBeenCalled();
@@ -429,7 +429,7 @@ describe('PaymentWebhookProcessor', () => {
         receipt: { upsert: receiptUpsert },
       })),
     };
-    const processor = new PaymentWebhookProcessor(prisma as any);
+    const processor = new PaymentWebhookProcessor(prisma as any, journal as any);
     await expect(processor.apply({ ...normalized, amount: '50.00' }, 'event-wallet-missing')).resolves.toEqual({ applied: false, reason: 'wallet-student-missing' });
     expect(paymentUpdate).not.toHaveBeenCalled();
     expect(receiptUpsert).not.toHaveBeenCalled();
@@ -459,7 +459,7 @@ describe('PaymentWebhookProcessor', () => {
         receipt: { upsert: receiptUpsert },
       })),
     };
-    const processor = new PaymentWebhookProcessor(prisma as any);
+    const processor = new PaymentWebhookProcessor(prisma as any, journal as any);
     await expect(processor.apply({ ...normalized, amount: '25.00' }, 'event-stationery-missing')).resolves.toEqual({ applied: false, reason: 'stationery-order-missing' });
     expect(paymentUpdate).not.toHaveBeenCalled();
     expect(receiptUpsert).not.toHaveBeenCalled();
@@ -487,7 +487,7 @@ describe('PaymentWebhookProcessor', () => {
         stationeryOrder: { findFirst: jest.fn().mockResolvedValue({ id: 'order-1', status: 'DRAFT', totalAmount: new Prisma.Decimal('30.00'), studentId: 'student-1', guardianId: 'guardian-1' }) },
       })),
     };
-    const processor = new PaymentWebhookProcessor(prisma as any);
+    const processor = new PaymentWebhookProcessor(prisma as any, journal as any);
     await expect(processor.apply({ ...normalized, amount: '25.00' }, 'event-stationery-mismatch')).resolves.toEqual({ applied: false, reason: 'stationery-order-mismatch' });
     expect(paymentUpdate).not.toHaveBeenCalled();
     expect(processingError).toContain('does not match');
