@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { WalletOperationsService } from './wallet-operations.service';
 
 describe('WalletOperationsService', () => {
+  const journal = { recordBalancedEntry: jest.fn().mockResolvedValue([]) };
   const tx = {
     idempotencyKey: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
     $queryRaw: jest.fn().mockResolvedValue([{ studentId: 'student-1' }]),
@@ -27,7 +28,7 @@ describe('WalletOperationsService', () => {
 
   it('requires an idempotency key for withdrawals', async () => {
     await expect(
-      new WalletOperationsService(prisma).withdraw(
+      new WalletOperationsService(prisma, journal as never).withdraw(
         'student-1',
         { amount: 10 },
         'user-1',
@@ -42,7 +43,7 @@ describe('WalletOperationsService', () => {
     tx.idempotencyKey.findUnique.mockResolvedValue({ requestHash: 'different-request', responseJson: null });
 
     await expect(
-      new WalletOperationsService(prisma).withdraw(
+      new WalletOperationsService(prisma, journal as never).withdraw(
         'student-1',
         { amount: 10 },
         'user-1',
@@ -75,7 +76,7 @@ describe('WalletOperationsService', () => {
     });
 
     await expect(
-      new WalletOperationsService(prisma).withdraw(
+      new WalletOperationsService(prisma, journal as never).withdraw(
         'student-1',
         { amount: 50, note: 'Student office withdrawal' },
         'user-1',
@@ -96,7 +97,7 @@ describe('WalletOperationsService', () => {
     });
 
     await expect(
-      new WalletOperationsService(prisma).withdraw(
+      new WalletOperationsService(prisma, journal as never).withdraw(
         'student-1',
         { amount: 100.01 },
         'user-1',
@@ -117,7 +118,7 @@ describe('WalletOperationsService', () => {
     });
 
     await expect(
-      new WalletOperationsService(prisma).withdraw(
+      new WalletOperationsService(prisma, journal as never).withdraw(
         'student-1',
         { amount: 10 },
         'user-1',
@@ -140,7 +141,7 @@ describe('WalletOperationsService', () => {
     tx.walletWithdrawal.create.mockResolvedValue({ id: 'withdrawal-1', status: 'DISPENSED' });
 
     await expect(
-      new WalletOperationsService(prisma).withdraw(
+      new WalletOperationsService(prisma, journal as never).withdraw(
         'student-1',
         { amount: 50, note: 'Student office withdrawal' },
         'user-1',
@@ -181,6 +182,10 @@ describe('WalletOperationsService', () => {
     expect(tx.idempotencyKey.update).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ statusCode: 200, responseJson: expect.objectContaining({ transactionId: 'new-withdrawal' }) }),
     }));
+    expect(journal.recordBalancedEntry).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ accountCode: 'WALLET_LIABILITY', direction: 'DEBIT', amount: '50.00', referenceType: 'WalletTransaction', referenceId: 'new-withdrawal' }),
+      expect.objectContaining({ accountCode: 'CASH', direction: 'CREDIT', amount: '50.00', referenceType: 'WalletTransaction', referenceId: 'new-withdrawal' }),
+    ]), 'user-1', tx);
     expect(tx.auditLog.create).toHaveBeenCalled();
   });
   it('reverses a signed credit exactly once and returns the adjusted balance', async () => {
@@ -198,7 +203,7 @@ describe('WalletOperationsService', () => {
     tx.walletWithdrawal.update.mockResolvedValue({});
 
     await expect(
-      new WalletOperationsService(prisma).reverse(
+      new WalletOperationsService(prisma, journal as never).reverse(
         'student-1',
         'top-up',
         { reason: 'Provider payment was duplicated.' },
@@ -212,6 +217,39 @@ describe('WalletOperationsService', () => {
       direction: WalletTransactionDirection.DEBIT,
       balance: '0.00',
     });
+  });
+
+  it('posts reversal accounting for a wallet transaction', async () => {
+    tx.wallet.findUnique.mockResolvedValue({
+      studentId: 'student-1',
+      currency: 'GHS',
+      transactions: [
+        { id: 'top-up', type: WalletTransactionType.TOP_UP, direction: WalletTransactionDirection.CREDIT, amount: new Prisma.Decimal('100'), reversalOfId: null, paymentId: 'payment-1', withdrawalId: null },
+      ],
+    });
+    tx.walletTransaction.create.mockResolvedValue({
+      id: 'reversal-1',
+      amount: new Prisma.Decimal('100'),
+    });
+
+    await expect(
+      new WalletOperationsService(prisma, journal as never).reverse(
+        'student-1',
+        'top-up',
+        { reason: 'Duplicate provider settlement.' },
+        'user-1',
+        [RoleName.OFFICE],
+        'reversal-journal-key',
+      ),
+    ).resolves.toMatchObject({
+      transactionId: 'reversal-1',
+      direction: WalletTransactionDirection.DEBIT,
+    });
+
+    expect(journal.recordBalancedEntry).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ accountCode: 'WALLET_LIABILITY', direction: 'DEBIT', amount: '100.00', referenceType: 'WalletTransaction', referenceId: 'reversal-1' }),
+      expect.objectContaining({ accountCode: 'CASH', direction: 'CREDIT', amount: '100.00', referenceType: 'WalletTransaction', referenceId: 'reversal-1' }),
+    ]), 'user-1', tx);
   });
 
   it('marks linked withdrawal evidence reversed when a withdrawal is reversed', async () => {
@@ -230,7 +268,7 @@ describe('WalletOperationsService', () => {
     tx.walletWithdrawal.update.mockResolvedValue({});
 
     await expect(
-      new WalletOperationsService(prisma).reverse(
+      new WalletOperationsService(prisma, journal as never).reverse(
         'student-1',
         'withdrawal-1',
         { reason: 'Cash dispense was voided.' },
@@ -267,7 +305,7 @@ describe('WalletOperationsService', () => {
     });
 
     await expect(
-      new WalletOperationsService(prisma).reverse(
+      new WalletOperationsService(prisma, journal as never).reverse(
         'student-1',
         'top-up',
         { reason: 'Duplicate provider settlement.' },
@@ -290,7 +328,7 @@ describe('WalletOperationsService', () => {
     });
 
     await expect(
-      new WalletOperationsService(prisma).reverse(
+      new WalletOperationsService(prisma, journal as never).reverse(
         'student-1',
         'top-up',
         { reason: 'Second correction.' },

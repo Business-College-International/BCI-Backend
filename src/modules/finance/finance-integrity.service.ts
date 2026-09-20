@@ -92,7 +92,7 @@ export class FinanceIntegrityService {
       }),
       this.prisma.financialJournalEntry.findMany({
         where: {
-          referenceType: { in: ['Payment', 'Refund'] },
+          referenceType: { in: ['Payment', 'Refund', 'WalletTransaction'] },
         },
         select: {
           id: true,
@@ -250,6 +250,19 @@ export class FinanceIntegrityService {
         paymentId: refund.paymentId,
         refundId: refund.refundId,
         amount: refund.amount.toFixed(2),
+      }));
+
+    const missingWalletJournalEntries = walletTransactions
+      .filter((transaction) =>
+        transaction.type === 'WITHDRAWAL' || transaction.type === 'REVERSAL',
+      )
+      .filter((transaction) => !journalByReference.has(`WalletTransaction:${transaction.id}`))
+      .map((transaction) => ({
+        transactionId: transaction.id,
+        walletId: transaction.walletId,
+        type: transaction.type,
+        direction: transaction.direction,
+        amount: transaction.amount.toFixed(2),
       }));
 
     const statusMismatches = [] as Array<{
@@ -507,6 +520,7 @@ export class FinanceIntegrityService {
         unbalancedJournalTransactions,
         missingPaymentJournalEntries,
         missingRefundJournalEntries,
+        missingWalletJournalEntries,
       },
       healthy:
         orphanAllocations.length === 0 &&
@@ -525,7 +539,8 @@ export class FinanceIntegrityService {
         invalidStationeryPaymentLinks.length === 0 &&
         unbalancedJournalTransactions.length === 0 &&
         missingPaymentJournalEntries.length === 0 &&
-        missingRefundJournalEntries.length === 0,
+        missingRefundJournalEntries.length === 0 &&
+        missingWalletJournalEntries.length === 0,
     };
   }
 }
