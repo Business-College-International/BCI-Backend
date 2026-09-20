@@ -106,6 +106,51 @@ describe('StudentLifecycleService', () => {
     expect(tx.schoolClass.findUnique).toHaveBeenCalled();
   });
 
+
+  it('rejects elective assignment into a closed term', async () => {
+    const tx = {
+      student: { findUnique: jest.fn().mockResolvedValue({ id: 'student-1', status: 'ACTIVE' }) },
+      enrolment: { findFirst: jest.fn().mockResolvedValue({ id: 'enrol-1', level: 'SHS1', programme: 'BUSINESS' }) },
+      subject: { findUnique: jest.fn().mockResolvedValue({ id: 'subject-1', isActive: true, isElective: true, level: 'SHS1', programme: 'BUSINESS' }) },
+      term: { findUnique: jest.fn().mockResolvedValue({ id: 'term-1', status: 'CLOSED' }) },
+      studentElective: { findFirst: jest.fn(), create: jest.fn() },
+      auditLog: { create: jest.fn() },
+    };
+
+    const service = new StudentLifecycleService(makePrisma({ ...tx }) as never);
+    await expect(service.assignElective('student-1', 'actor-1', { termId: 'term-1', subjectId: 'subject-1' }))
+      .rejects.toThrow('cannot be changed after the term is closed');
+    expect(tx.studentElective.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects elective removal from a closed term', async () => {
+    const tx = {
+      enrolment: { findFirst: jest.fn().mockResolvedValue({ id: 'enrol-1', status: 'ACTIVE' }) },
+      term: { findUnique: jest.fn().mockResolvedValue({ id: 'term-1', status: 'CLOSED' }) },
+      studentElective: { findFirst: jest.fn(), delete: jest.fn() },
+      auditLog: { create: jest.fn() },
+    };
+
+    const service = new StudentLifecycleService(makePrisma({ ...tx }) as never);
+    await expect(service.removeElective('student-1', 'subject-1', 'term-1', 'actor-1'))
+      .rejects.toThrow('cannot be changed after the term is closed');
+    expect(tx.studentElective.delete).not.toHaveBeenCalled();
+  });
+
+  it('rejects elective removal when the term enrolment is no longer active', async () => {
+    const tx = {
+      enrolment: { findFirst: jest.fn().mockResolvedValue({ id: 'enrol-1', status: 'COMPLETED' }) },
+      term: { findUnique: jest.fn().mockResolvedValue({ id: 'term-1', status: 'OPEN' }) },
+      studentElective: { findFirst: jest.fn(), delete: jest.fn() },
+      auditLog: { create: jest.fn() },
+    };
+
+    const service = new StudentLifecycleService(makePrisma({ ...tx }) as never);
+    await expect(service.removeElective('student-1', 'subject-1', 'term-1', 'actor-1'))
+      .rejects.toThrow('cannot be changed without an active enrolment');
+    expect(tx.studentElective.delete).not.toHaveBeenCalled();
+  });
+
   it('rejects duplicate elective assignment', async () => {
     const tx = {
       student: { findUnique: jest.fn().mockResolvedValue({ id: 'student-1', status: 'ACTIVE' }) },
