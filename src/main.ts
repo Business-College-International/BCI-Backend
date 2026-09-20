@@ -1,6 +1,6 @@
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-import type { Request, Response } from 'express';
+import type { NextFunction, Request, Response } from 'express';
 import { AppModule } from './app.module';
 import { getCorsOrigins, validateEnvironment } from './config/environment';
 import { requestLoggingMiddleware } from './common/logging/request-logging.middleware';
