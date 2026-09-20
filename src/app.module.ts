@@ -21,14 +21,8 @@ import { StudentsModule } from './modules/students/students.module';
 import { TimetableModule } from './modules/timetable/timetable.module';
 import { WalletModule } from './modules/wallet/wallet.module';
 import { PrismaService } from './prisma.service';
-
-@Controller('health')
-class HealthController {
-  @Get()
-  health(): { status: 'ok'; service: string; version: string } {
-    return { status: 'ok', service: 'bci-backend-api', version: '0.1.0' };
-  }
-}
+import { HealthController } from './modules/health/health.controller';
+import { HealthService } from './modules/health/health.service';
 
 @Module({
   imports: [
@@ -55,6 +49,6 @@ class HealthController {
     WalletModule,
   ],
   controllers: [HealthController],
-  providers: [PrismaService],
+  providers: [PrismaService, HealthService],
 })
 export class AppModule {}
